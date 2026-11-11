@@ -1,0 +1,274 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* Institutional Healthcare Color Tokens (cbecea.com/en) */
+  --color-brand-50: #eef6f1;
+  --color-brand-100: #d7e9de;
+  --color-brand-200: #b9d9c6;
+  --color-brand-400: #2e9c64;
+  --color-brand-500: #17864e;
+  --color-brand-600: #0b6e3e;
+  --color-brand-700: #005830;
+  --color-brand-800: #00401f;
+  --color-brand-900: #002a17;
+
+  --color-accent-50: #fdf1f1;
+  --color-accent-100: #faddde;
+  --color-accent-500: #d82028;
+  --color-accent-600: #a3151c;
+  --color-accent-700: #a3151c;
+  --color-accent-800: #5e0c10;
+
+  --color-gold-50: #fdf9ef;
+  --color-gold-100: #f3e9cf;
+  --color-gold-700: #9a7220;
+
+  --color-ink: #101613;
+  --color-ink-2: #2b3831;
+  --color-mut: #5c6b62;
+  --color-mut-2: #7c8b82;
+  --color-line: #e3eae5;
+  --color-line-2: #eff4f0;
+  --color-paper: #ffffff;
+  --color-paper-2: #f8faf8;
+  --color-paper-3: #f0f5f1;
+}
+
+*,
+*::before,
+*::after {
+  animation: none !important;
+  transition: none !important;
+}
+
+body {
+  font-family: var(--font-body);
+  font-size: 0.875rem;
+  line-height: 1.5;
+  text-align: start;
+  background-color: var(--color-paper-2);
+  color: var(--color-ink);
+  margin: 0;
+  overflow-wrap: break-word;
+}
+
+p {
+  text-wrap: pretty;
+  max-width: 75ch;
+}
+
+/* Unified Reusable DataList / Responsive Sticky Table */
+.table-wrapper {
+  overflow: auto;
+  max-inline-size: 100%;
+  max-block-size: min(680px, 78vh);
+  container-type: inline-size;
+  background: var(--color-paper);
+}
+
+.table-wrapper table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 0.875rem;
+}
+
+.table-wrapper thead {
+  position: sticky;
+  inset-block-start: 0;
+  z-index: 2;
+  background-color: var(--color-paper-2);
+}
+
+.table-wrapper th {
+  text-align: start;
+  font-weight: 600;
+  color: var(--color-ink-2);
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--color-line);
+  font-size: 0.8125rem;
+  text-wrap: balance;
+}
+
+.table-wrapper td {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--color-line-2);
+  color: var(--color-ink);
+  vertical-align: middle;
+}
+
+.table-wrapper tbody tr:last-child td {
+  border-bottom: none;
+}
+
+@container (width < 580px) {
+  .table-wrapper table,
+  .table-wrapper thead,
+  .table-wrapper tbody,
+  .table-wrapper tr,
+  .table-wrapper th,
+  .table-wrapper td {
+    display: block;
+  }
+
+  .table-wrapper thead {
+    display: none;
+  }
+
+  .table-wrapper tbody tr {
+    border-bottom: 1px solid var(--color-line);
+    padding-block: 0.5rem;
+  }
+
+  .table-wrapper td {
+    border-bottom: none;
+    padding: 0.375rem 1rem;
+  }
+
+  .table-wrapper td[data-col-label]::before {
+    content: attr(data-col-label) ": ";
+    font-weight: 600;
+    color: var(--color-mut);
+    font-size: 0.8125rem;
+  }
+}
+
+/* Native Modal Dialog Containment (dialog guide) */
+dialog:modal {
+  overscroll-behavior: contain;
+  border: 1px solid var(--color-line);
+  border-radius: 0.5rem;
+  padding: 0;
+  background: var(--color-paper);
+  color: var(--color-ink);
+  box-shadow: 0 12px 32px rgba(16, 22, 19, 0.16);
+  max-width: min(720px, 94vw);
+  width: 100%;
+}
+
+dialog::backdrop {
+  overflow: hidden;
+  overscroll-behavior: contain;
+  background: rgba(16, 22, 19, 0.45);
+}
+
+/* Canonical Visually Hidden Utility */
+.visually-hidden {
+  position: absolute;
+  clip-path: inset(50%);
+  overflow: hidden;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  white-space: nowrap;
+}
+
+/* Standard Form Controls */
+input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+select,
+textarea {
+  font-family: inherit;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: var(--color-ink);
+  background-color: var(--color-paper);
+  border: 1px solid #b8c4bc;
+  border-radius: 0.375rem;
+  padding: 0.5rem 0.75rem;
+  box-sizing: border-box;
+}
+
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--color-brand-700);
+  outline-offset: 1px;
+}
+
+/* Clean Button Primitives */
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  background-color: var(--color-brand-700);
+  color: #ffffff;
+  border: 1px solid var(--color-brand-700);
+  border-radius: 0.375rem;
+  padding: 0.5rem 0.875rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.btn-primary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  background-color: var(--color-paper);
+  color: var(--color-ink-2);
+  border: 1px solid var(--color-line);
+  border-radius: 0.375rem;
+  padding: 0.5rem 0.875rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.btn-secondary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn-danger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  background-color: var(--color-accent-50);
+  color: var(--color-accent-600);
+  border: 1px solid var(--color-accent-100);
+  border-radius: 0.375rem;
+  padding: 0.45rem 0.75rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+/* Hospital Health Package Card Grid (card + css-layout subgrid alignment) */
+.package-card-grid {
+  display: grid;
+  inline-size: 100%;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  grid-auto-rows: auto;
+  gap: 1rem;
+}
+
+.package-card {
+  grid-row: span 3;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  grid-template-rows: subgrid;
+  row-gap: 0.75rem;
+  background-color: var(--color-paper);
+  border: 1px solid var(--color-line);
+  border-radius: 0.5rem;
+  padding: 1rem 1.125rem;
+}

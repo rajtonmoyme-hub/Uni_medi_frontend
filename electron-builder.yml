@@ -1,0 +1,22 @@
+appId: com.unifiedmedi.healthplatform
+productName: Unified Health Platform
+directories:
+  output: release
+files:
+  - dist/**/*
+  - electron/**/*
+  - package.json
+linux:
+  target:
+    - AppImage
+    - tar.gz
+    - pacman
+  category: MedicalSoftware
+  maintainer: Unified Health Platform <support@example.com>
+win:
+  target:
+    - nsis
+    - portable
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
