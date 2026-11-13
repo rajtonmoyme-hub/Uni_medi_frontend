@@ -1,20 +1,27 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
-  QrCode,
-  Plus,
+  Calendar,
+  Check,
+  CheckCheck,
+  Clock,
+  Copy,
   Download,
   Eye,
+  FilePlus2,
+  Plus,
+  QrCode,
   Trash2,
-  CheckCheck,
-  Calendar,
-} from 'lucide-react';
-import { apiRequest } from '../services/api';
-import { useAuth } from '../context/AuthContext';
-import { DataList } from '../components/DataList';
-import { ModalDialog } from '../components/ModalDialog';
-import { DocumentViewerModal } from '../components/DocumentViewerModal';
-import { StatusBadge } from '../components/StatusBadge';
-import { downloadClinicalDocumentPdf } from '../utils/pdfDownload';
+  UserCheck,
+  XCircle,
+} from "lucide-react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { DataList } from "../components/DataList";
+import { DocumentViewerModal } from "../components/DocumentViewerModal";
+import { ModalDialog } from "../components/ModalDialog";
+import { StatusBadge } from "../components/StatusBadge";
+import { TransientToast } from "../components/TransientToast";
+import { useAuth } from "../context/AuthContext";
+import { apiRequest } from "../services/api";
+import { downloadClinicalDocumentPdf } from "../utils/pdfDownload";
 
 function computeDoctorFeeRange(doc: any): string {
   const affFees = (doc.affiliations || [])
@@ -23,7 +30,7 @@ function computeDoctorFeeRange(doc: any): string {
 
   if (affFees.length === 0) {
     const fallback = Number(doc.defaultConsultationFee || 0);
-    return fallback > 0 ? `${fallback.toLocaleString()} Tk` : '—';
+    return fallback > 0 ? `${fallback.toLocaleString()} Tk` : "—";
   }
 
   const min = Math.min(...affFees);
@@ -34,97 +41,30 @@ function computeDoctorFeeRange(doc: any): string {
   return `${min.toLocaleString()} – ${max.toLocaleString()} Tk`;
 }
 
-interface HealthPackageCardProps {
-  pkg: any;
-  onViewHospital?: (hospitalName: string) => void;
+function formatRemainingTime(expiresAtIso: string, nowMs: number): string {
+  const diffMs = new Date(expiresAtIso).getTime() - nowMs;
+  if (diffMs <= 0) return "Expired";
+  const totalMinutes = Math.ceil(diffMs / 60000);
+  const hours = Math.floor(totalMinutes / 60);
+  const mins = totalMinutes % 60;
+  if (hours > 0) {
+    return `${hours}h ${mins}m left`;
+  }
+  return `${mins}m left`;
 }
 
-const HealthPackageCard: React.FC<HealthPackageCardProps> = ({
-  pkg,
-  onViewHospital,
-}) => {
-  const tests: string[] = Array.isArray(pkg.includedTests)
-    ? pkg.includedTests
-    : [];
-
-  return (
-    <article className="package-card">
-      <header className="space-y-1.5">
-        <div className="flex items-start justify-between gap-2">
-          <h3 className="text-base font-semibold text-ink leading-snug">
-            {pkg.title}
-          </h3>
-          {pkg.isFeatured && <StatusBadge label="Featured" tone="brand" />}
-        </div>
-        <div className="text-xs text-mut">
-          <span className="font-medium text-ink-2">
-            {pkg.workspace?.name || 'Registered Facility'}
-          </span>
-          {pkg.workspace?.area ? ` · ${pkg.workspace.area}` : ''}
-        </div>
-      </header>
-
-      <div className="space-y-2.5 text-sm">
-        {(pkg.tagline || pkg.description) && (
-          <p className="text-xs text-mut">
-            {pkg.tagline || pkg.description}
-          </p>
-        )}
-        <div>
-          <div className="text-xs font-semibold text-ink-2 mb-1">
-            Included Investigations ({tests.length || 1})
-          </div>
-          {tests.length > 0 ? (
-            <ul className="flex flex-wrap gap-1">
-              {tests.slice(0, 6).map((test: string, i: number) => (
-                <li
-                  key={i}
-                  className="rounded border border-line bg-paper-2 px-2 py-0.5 text-xs text-ink-2"
-                >
-                  {test}
-                </li>
-              ))}
-              {tests.length > 6 && (
-                <li className="rounded border border-line bg-paper-2 px-2 py-0.5 text-xs font-mono text-mut">
-                  +{tests.length - 6} more
-                </li>
-              )}
-            </ul>
-          ) : (
-            <p className="text-xs text-mut">Standard diagnostic checkup panel</p>
-          )}
-        </div>
-      </div>
-
-      <footer className="pt-3 border-t border-line flex items-end justify-between gap-3">
-        <div>
-          <div className="text-xs text-mut">
-            {pkg.durationLabel || 'Standard Delivery'}
-          </div>
-          <div className="flex items-baseline gap-2 mt-0.5 font-mono">
-            <span className="text-lg font-semibold text-brand-700">
-              {Number(pkg.price || 0).toLocaleString()} Tk
-            </span>
-            {pkg.originalPrice ? (
-              <span className="text-xs text-mut line-through">
-                {Number(pkg.originalPrice).toLocaleString()} Tk
-              </span>
-            ) : null}
-          </div>
-        </div>
-        {onViewHospital && pkg.workspace?.name && (
-          <button
-            type="button"
-            onClick={() => onViewHospital(pkg.workspace.name)}
-            className="btn-secondary !px-2.5 !py-1 text-xs"
-          >
-            View Doctors
-          </button>
-        )}
-      </footer>
-    </article>
-  );
-};
+function calculateAgeFromDob(dob?: string | null): string | null {
+  if (!dob) return null;
+  const parsed = new Date(dob);
+  if (Number.isNaN(parsed.getTime())) return null;
+  const now = new Date();
+  let age = now.getFullYear() - parsed.getFullYear();
+  const m = now.getMonth() - parsed.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < parsed.getDate())) {
+    age--;
+  }
+  return age >= 0 && age < 130 ? `${age} yrs` : null;
+}
 
 export const PatientPortal: React.FC = () => {
   const {
@@ -145,21 +85,44 @@ export const PatientPortal: React.FC = () => {
   const [familyData, setFamilyData] = useState<any>(null);
   const [staffInvites, setStaffInvites] = useState<any[]>([]);
   const [notifications, setNotifications] = useState<any[]>([]);
-  const [notifFilter, setNotifFilter] = useState<'ALL' | 'INVITATIONS' | 'UNREAD'>('ALL');
+  const [notifFilter, setNotifFilter] = useState<
+    "ALL" | "INVITATIONS" | "UNREAD"
+  >("ALL");
   const [feedback, setFeedback] = useState<{
-    type: 'success' | 'error';
+    type: "success" | "error";
     text: string;
   } | null>(null);
+  const [nowTick, setNowTick] = useState<number>(() => Date.now());
+  const [copiedCode, setCopiedCode] = useState<string | null>(null);
 
   // Medical Records Filters & Selection
-  const [vaultDoctorFilter, setVaultDoctorFilter] = useState<string>('');
-  const [vaultWorkspaceFilter, setVaultWorkspaceFilter] = useState<string>('');
-  const [vaultTypeFilter, setVaultTypeFilter] = useState<string>('');
-  const [vaultSortBy, setVaultSortBy] = useState<string>('date_desc');
+  const [vaultSearch, setVaultSearch] = useState<string>("");
+  const [vaultDoctorFilter, setVaultDoctorFilter] = useState<string>("");
+  const [vaultWorkspaceFilter, setVaultWorkspaceFilter] = useState<string>("");
+  const [vaultTypeFilter, setVaultTypeFilter] = useState<string>("");
+  const [vaultSortBy, setVaultSortBy] = useState<string>("date_desc");
   const [selectedDocIds, setSelectedDocIds] = useState<string[]>([]);
+
+  // Self-Upload Modal State
+  const [uploadModalOpen, setUploadModalOpen] = useState<boolean>(false);
+  const [uploadType, setUploadType] = useState<
+    "PRESCRIPTION" | "LAB_REPORT" | "BILLING_DOC"
+  >("PRESCRIPTION");
+  const [uploadTitle, setUploadTitle] = useState<string>("");
+  const [uploadSummary, setUploadSummary] = useState<string>("");
+  const [uploadDoctorName, setUploadDoctorName] = useState<string>("");
+  const [uploadWorkspaceName, setUploadWorkspaceName] = useState<string>("");
+  const [uploadMedName, setUploadMedName] = useState<string>("");
+  const [uploadMedDosage, setUploadMedDosage] = useState<string>("1 + 0 + 1");
+  const [uploadMedDuration, setUploadMedDuration] = useState<string>("7 Days");
+  const [uploadLabParam, setUploadLabParam] = useState<string>("");
+  const [uploadLabResult, setUploadLabResult] = useState<string>("");
+  const [uploadLabRef, setUploadLabRef] = useState<string>("");
+  const [uploadSubmitting, setUploadSubmitting] = useState<boolean>(false);
 
   // Modals State
   const [inspectedDoc, setInspectedDoc] = useState<any | null>(null);
+  const [inspectedPackage, setInspectedPackage] = useState<any | null>(null);
   const [qrPopupData, setQrPopupData] = useState<any | null>(null);
   const [activeSharesModalOpen, setActiveSharesModalOpen] =
     useState<boolean>(false);
@@ -168,60 +131,164 @@ export const PatientPortal: React.FC = () => {
   const [addFamilyModalOpen, setAddFamilyModalOpen] = useState<boolean>(false);
 
   // Doctor Directory Filters & Appointment Request Form
-  const [docSearch, setDocSearch] = useState<string>('');
-  const [docWorkspaceFilter, setDocWorkspaceFilter] = useState<string>('');
-  const [docSpecialtyFilter, setDocSpecialtyFilter] = useState<string>('');
-  const [docAreaFilter, setDocAreaFilter] = useState<string>('');
-  const [bookingWorkspaceId, setBookingWorkspaceId] = useState<string>('');
+  const [docSearch, setDocSearch] = useState<string>("");
+  const [docWorkspaceFilter, setDocWorkspaceFilter] = useState<string>("");
+  const [docSpecialtyFilter, setDocSpecialtyFilter] = useState<string>("");
+  const [docAreaFilter, setDocAreaFilter] = useState<string>("");
+  const [bookingWorkspaceId, setBookingWorkspaceId] = useState<string>("");
   const [bookingDate, setBookingDate] = useState<string>(() =>
-    new Date(Date.now() + 86400000).toISOString().slice(0, 10)
+    new Date(Date.now() + 86400000).toISOString().slice(0, 10),
   );
-  const [bookingSlot, setBookingSlot] = useState<string>('06:00 PM');
-  const [bookingReason, setBookingReason] = useState<string>('');
+  const [bookingSlot, setBookingSlot] = useState<string>("06:00 PM");
+  const [bookingReason, setBookingReason] = useState<string>("");
   const [bookingError, setBookingError] = useState<string | null>(null);
   const [bookingSubmitting, setBookingSubmitting] = useState<boolean>(false);
 
+  // Appointments Section Filters
+  const [aptStatusFilter, setAptStatusFilter] = useState<
+    "ALL" | "UPCOMING" | "COMPLETED" | "CANCELLED"
+  >("ALL");
+  const [aptSearch, setAptSearch] = useState<string>("");
+
   // Hospitals Directory Filters
-  const [wsSearch, setWsSearch] = useState<string>('');
-  const [wsArea, setWsArea] = useState<string>('');
-  const [wsType, setWsType] = useState<string>('');
-  const [wsSortBy, setWsSortBy] = useState<string>('name_asc');
+  const [wsSearch, setWsSearch] = useState<string>("");
+  const [wsArea, setWsArea] = useState<string>("");
+  const [wsType, setWsType] = useState<string>("");
+  const [wsSortBy, setWsSortBy] = useState<string>("name_asc");
 
   // Family Add Member Popup State
-  const [famTargetId, setFamTargetId] = useState<string>('');
-  const [famDirection, setFamDirection] = useState<string>('AS_MAINTAINER');
-  const [famType, setFamType] = useState<string>('CHILD');
-  const [famLabel, setFamLabel] = useState<string>('Son / Daughter');
+  const [famTargetId, setFamTargetId] = useState<string>("");
+  const [famDirection, setFamDirection] = useState<string>("AS_MAINTAINER");
+  const [famType, setFamType] = useState<string>("CHILD");
+  const [famLabel, setFamLabel] = useState<string>("Son / Daughter");
 
   // Profile Form State
-  const [profName, setProfName] = useState<string>('');
-  const [profPhone, setProfPhone] = useState<string>('');
-  const [profNewPassword, setProfNewPassword] = useState<string>('');
-  const [profNid, setProfNid] = useState<string>('');
-  const [profBloodGroup, setProfBloodGroup] = useState<string>('');
-  const [profAddress, setProfAddress] = useState<string>('');
-  const [profAvatar, setProfAvatar] = useState<string>('');
+  const [profName, setProfName] = useState<string>("");
+  const [profPhone, setProfPhone] = useState<string>("");
+  const [profNewPassword, setProfNewPassword] = useState<string>("");
+  const [profNid, setProfNid] = useState<string>("");
+  const [profBloodGroup, setProfBloodGroup] = useState<string>("");
+  const [profGender, setProfGender] = useState<string>("");
+  const [profDob, setProfDob] = useState<string>("");
+  const [profEmergencyContact, setProfEmergencyContact] = useState<string>("");
+  const [profAddress, setProfAddress] = useState<string>("");
+  const [profAvatar, setProfAvatar] = useState<string>("");
   const [secondaryEmails, setSecondaryEmails] = useState<string[]>([]);
-  const [newSecEmail, setNewSecEmail] = useState<string>('');
+  const [newSecEmail, setNewSecEmail] = useState<string>("");
   const [secondaryPhones, setSecondaryPhones] = useState<string[]>([]);
-  const [newSecPhone, setNewSecPhone] = useState<string>('');
+  const [newSecPhone, setNewSecPhone] = useState<string>("");
 
-  const showFeedback = (type: 'success' | 'error', text: string) => {
+  // Live ticker for QR session countdowns
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setNowTick(Date.now());
+    }, 15000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  // Synchronize aria-invalid with :user-invalid (and fallback class) after user interaction
+  useEffect(() => {
+    const supportsUserInvalid =
+      typeof CSS !== "undefined" &&
+      typeof CSS.supports === "function" &&
+      CSS.supports("selector(:user-invalid)");
+    const dirtyFields = new WeakMap<
+      Element,
+      { interacted: boolean; blurred: boolean }
+    >();
+
+    const syncField = (el: EventTarget | null) => {
+      if (
+        !(el instanceof HTMLElement) ||
+        !el.matches("input, select, textarea")
+      ) {
+        return;
+      }
+      const control = el as
+        | HTMLInputElement
+        | HTMLSelectElement
+        | HTMLTextAreaElement;
+      const isInvalid = supportsUserInvalid
+        ? control.matches(":user-invalid")
+        : Boolean(
+            dirtyFields.get(control)?.interacted &&
+            dirtyFields.get(control)?.blurred &&
+            !control.validity.valid,
+          );
+
+      if (!supportsUserInvalid) {
+        control.classList.toggle("user-invalid-fallback", isInvalid);
+      }
+      control.setAttribute("aria-invalid", isInvalid ? "true" : "false");
+    };
+
+    const onInputOrChange = (e: Event) => {
+      if (e.target instanceof HTMLElement) {
+        const prev = dirtyFields.get(e.target) || {
+          interacted: false,
+          blurred: false,
+        };
+        dirtyFields.set(e.target, { ...prev, interacted: true });
+      }
+      syncField(e.target);
+    };
+
+    const onBlur = (e: Event) => {
+      if (e.target instanceof HTMLElement) {
+        const prev = dirtyFields.get(e.target) || {
+          interacted: false,
+          blurred: false,
+        };
+        dirtyFields.set(e.target, { ...prev, blurred: true });
+      }
+      syncField(e.target);
+    };
+
+    const onInvalid = (e: Event) => {
+      if (e.target instanceof HTMLElement) {
+        dirtyFields.set(e.target, { interacted: true, blurred: true });
+      }
+      syncField(e.target);
+    };
+
+    document.addEventListener("input", onInputOrChange);
+    document.addEventListener("change", onInputOrChange, true);
+    document.addEventListener("blur", onBlur, true);
+    document.addEventListener("invalid", onInvalid, true);
+    return () => {
+      document.removeEventListener("input", onInputOrChange);
+      document.removeEventListener("change", onInputOrChange, true);
+      document.removeEventListener("blur", onBlur, true);
+      document.removeEventListener("invalid", onInvalid, true);
+    };
+  }, []);
+
+  const showFeedback = (type: "success" | "error", text: string) => {
     setFeedback({ type, text });
+  };
+
+  const handleCopyCode = async (code: string) => {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopiedCode(code);
+      window.setTimeout(() => setCopiedCode(null), 2000);
+    } catch {
+      showFeedback("error", "Unable to copy code to clipboard.");
+    }
   };
 
   const loadCoreData = useCallback(async () => {
     try {
-      const notifParams = new URLSearchParams({ persona: 'PATIENT' });
-      if (actingPatientId) notifParams.set('actingPatientId', actingPatientId);
+      const notifParams = new URLSearchParams({ persona: "PATIENT" });
+      if (actingPatientId) notifParams.set("actingPatientId", actingPatientId);
 
       const [dashRes, qrRes, aptRes, invitesRes, famRes, notifRes] =
         await Promise.all([
-          apiRequest('/patient/dashboard'),
-          apiRequest('/patient/vault/qr-sessions'),
-          apiRequest('/patient/appointments'),
-          apiRequest('/patient/staff-invitations'),
-          apiRequest('/patient/family'),
+          apiRequest("/patient/dashboard"),
+          apiRequest("/patient/vault/qr-sessions"),
+          apiRequest("/patient/appointments"),
+          apiRequest("/patient/staff-invitations"),
+          apiRequest("/patient/family"),
           apiRequest(`/notifications?${notifParams.toString()}`),
         ]);
 
@@ -233,34 +300,39 @@ export const PatientPortal: React.FC = () => {
       setNotifications(notifRes.notifications || []);
 
       if (dashRes.patient) {
-        setProfName(dashRes.patient.name || '');
-        setProfPhone(dashRes.patient.phone || '');
-        setProfNid(dashRes.patient.nationalId || '');
-        setProfBloodGroup(dashRes.patient.bloodGroup || '');
-        setProfAddress(dashRes.patient.address || '');
-        setProfAvatar(dashRes.patient.profileAvatar || '');
+        setProfName(dashRes.patient.name || "");
+        setProfPhone(dashRes.patient.phone || "");
+        setProfNid(dashRes.patient.nationalId || "");
+        setProfBloodGroup(dashRes.patient.bloodGroup || "");
+        setProfGender(dashRes.patient.gender || "");
+        setProfDob(dashRes.patient.dateOfBirth || "");
+        setProfEmergencyContact(dashRes.patient.emergencyContact || "");
+        setProfAddress(dashRes.patient.address || "");
+        setProfAvatar(dashRes.patient.profileAvatar || "");
         setSecondaryEmails(dashRes.patient.secondaryEmails || []);
         setSecondaryPhones(dashRes.patient.secondaryPhones || []);
       }
     } catch (err: any) {
-      showFeedback('error', err.message || 'Failed to load patient records.');
+      showFeedback("error", err.message || "Failed to load patient records.");
     }
   }, [actingPatientId]);
 
   const loadVaultDocs = useCallback(async () => {
     try {
       const params = new URLSearchParams();
-      if (vaultDoctorFilter) params.set('doctorName', vaultDoctorFilter);
+      if (vaultSearch) params.set("search", vaultSearch);
+      if (vaultDoctorFilter) params.set("doctorName", vaultDoctorFilter);
       if (vaultWorkspaceFilter)
-        params.set('workspaceName', vaultWorkspaceFilter);
-      if (vaultTypeFilter) params.set('type', vaultTypeFilter);
-      params.set('sortBy', vaultSortBy);
+        params.set("workspaceName", vaultWorkspaceFilter);
+      if (vaultTypeFilter) params.set("type", vaultTypeFilter);
+      params.set("sortBy", vaultSortBy);
       const res = await apiRequest(`/patient/vault?${params.toString()}`);
       setVaultDocs(res.documents || []);
     } catch (err: any) {
-      showFeedback('error', err.message);
+      showFeedback("error", err.message);
     }
   }, [
+    vaultSearch,
     vaultDoctorFilter,
     vaultWorkspaceFilter,
     vaultTypeFilter,
@@ -271,28 +343,28 @@ export const PatientPortal: React.FC = () => {
   const loadDoctors = useCallback(async () => {
     try {
       const params = new URLSearchParams();
-      if (docSearch) params.set('search', docSearch);
-      if (docWorkspaceFilter) params.set('workspaceName', docWorkspaceFilter);
-      if (docSpecialtyFilter) params.set('specialty', docSpecialtyFilter);
-      if (docAreaFilter) params.set('area', docAreaFilter);
+      if (docSearch) params.set("search", docSearch);
+      if (docWorkspaceFilter) params.set("workspaceName", docWorkspaceFilter);
+      if (docSpecialtyFilter) params.set("specialty", docSpecialtyFilter);
+      if (docAreaFilter) params.set("area", docAreaFilter);
       const res = await apiRequest(`/patient/doctors?${params.toString()}`);
       setDoctors(res.doctors || []);
     } catch (err: any) {
-      showFeedback('error', err.message);
+      showFeedback("error", err.message);
     }
   }, [docSearch, docWorkspaceFilter, docSpecialtyFilter, docAreaFilter]);
 
   const loadWorkspaces = useCallback(async () => {
     try {
       const params = new URLSearchParams();
-      if (wsSearch) params.set('search', wsSearch);
-      if (wsArea) params.set('area', wsArea);
-      if (wsType) params.set('type', wsType);
-      params.set('sortBy', wsSortBy);
+      if (wsSearch) params.set("search", wsSearch);
+      if (wsArea) params.set("area", wsArea);
+      if (wsType) params.set("type", wsType);
+      params.set("sortBy", wsSortBy);
       const res = await apiRequest(`/patient/workspaces?${params.toString()}`);
       setWorkspacesData(res);
     } catch (err: any) {
-      showFeedback('error', err.message);
+      showFeedback("error", err.message);
     }
   }, [wsSearch, wsArea, wsType, wsSortBy]);
 
@@ -304,17 +376,17 @@ export const PatientPortal: React.FC = () => {
   }, [loadCoreData, loadVaultDocs, loadDoctors, loadWorkspaces]);
 
   const activeQrSessions = useMemo(() => {
-    const now = new Date();
+    const now = new Date(nowTick);
     return qrSessions.filter(
       (s: any) =>
-        ['GENERATED', 'SCANNED_ACTIVE'].includes(s.status) &&
-        new Date(s.expiresAt) > now
+        ["GENERATED", "SCANNED_ACTIVE"].includes(s.status) &&
+        new Date(s.expiresAt) > now,
     );
-  }, [qrSessions]);
+  }, [qrSessions, nowTick]);
 
   const handleToggleDocRow = (id: string) => {
     setSelectedDocIds((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
     );
   };
 
@@ -326,20 +398,20 @@ export const PatientPortal: React.FC = () => {
     }
   };
 
-  const handleGenerateQr = async () => {
-    if (selectedDocIds.length === 0) return;
+  const handleGenerateQr = async (forceSelectAll = false) => {
     try {
-      const res = await apiRequest('/patient/vault/qr-generate', {
-        method: 'POST',
+      const useAll = forceSelectAll || selectedDocIds.length === 0;
+      const res = await apiRequest("/patient/vault/qr-generate", {
+        method: "POST",
         body: {
-          selectAll: false,
-          documentIds: selectedDocIds,
+          selectAll: useAll,
+          documentIds: useAll ? [] : selectedDocIds,
         },
       });
       setQrPopupData(res);
       await loadCoreData();
     } catch (err: any) {
-      showFeedback('error', err.message);
+      showFeedback("error", err.message);
     }
   };
 
@@ -347,30 +419,113 @@ export const PatientPortal: React.FC = () => {
     try {
       const res = await apiRequest(
         `/patient/vault/qr-sessions/${sessionId}/revoke`,
-        { method: 'POST' }
+        { method: "POST" },
       );
-      showFeedback('success', res.message);
+      showFeedback("success", res.message);
       if (qrPopupData?.session?.id === sessionId) {
         setQrPopupData(null);
       }
       await loadCoreData();
     } catch (err: any) {
-      showFeedback('error', err.message);
+      showFeedback("error", err.message);
+    }
+  };
+
+  const handleSelfUploadRecord = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!uploadTitle.trim()) return;
+    setUploadSubmitting(true);
+    try {
+      const structuredData: Record<string, any> = {
+        notes: uploadSummary.trim() || undefined,
+      };
+      if (uploadType === "PRESCRIPTION") {
+        structuredData.diagnosis = uploadSummary.trim() || uploadTitle.trim();
+        if (uploadMedName.trim()) {
+          structuredData.medications = [
+            {
+              name: uploadMedName.trim(),
+              dosage: uploadMedDosage.trim() || "1 + 0 + 1",
+              duration: uploadMedDuration.trim() || "7 Days",
+              instruction: "As prescribed",
+            },
+          ];
+        }
+      } else if (uploadType === "LAB_REPORT") {
+        structuredData.testCategory = "External Diagnostic Report";
+        structuredData.conclusion =
+          uploadSummary.trim() || "Recorded by patient";
+        if (uploadLabParam.trim()) {
+          structuredData.parameters = [
+            {
+              name: uploadLabParam.trim(),
+              result: uploadLabResult.trim() || "Recorded",
+              referenceRange: uploadLabRef.trim() || "Standard",
+              flag: "NORMAL",
+            },
+          ];
+        }
+      } else {
+        structuredData.paymentStatus = "PAID";
+        structuredData.items = [
+          {
+            description: uploadTitle.trim(),
+            qty: 1,
+            amount: 0,
+          },
+        ];
+      }
+
+      const res = await apiRequest("/patient/vault/self-upload", {
+        method: "POST",
+        body: {
+          type: uploadType,
+          title: uploadTitle.trim(),
+          summary: uploadSummary.trim() || undefined,
+          doctorNameSnapshot: uploadDoctorName.trim() || undefined,
+          workspaceNameSnapshot: uploadWorkspaceName.trim() || undefined,
+          structuredData,
+        },
+      });
+      showFeedback("success", res.message);
+      setUploadModalOpen(false);
+      setUploadTitle("");
+      setUploadSummary("");
+      setUploadDoctorName("");
+      setUploadWorkspaceName("");
+      setUploadMedName("");
+      setUploadLabParam("");
+      setUploadLabResult("");
+      setUploadLabRef("");
+      await Promise.all([loadCoreData(), loadVaultDocs()]);
+    } catch (err: any) {
+      showFeedback("error", err.message || "Unable to upload record.");
+    } finally {
+      setUploadSubmitting(false);
     }
   };
 
   const openBookAppointmentModal = (doc: any) => {
     setBookingError(null);
     setBookingDoctor(doc);
-    const firstAffWs = doc.affiliations?.[0]?.workspaceId;
-    setBookingWorkspaceId(firstAffWs || 'INDEPENDENT_CHAMBER');
+    const firstAff = doc.affiliations?.[0];
+    const firstAffWs = firstAff?.workspaceId;
+    setBookingWorkspaceId(firstAffWs || "INDEPENDENT_CHAMBER");
+    const initialSlots: string[] = firstAffWs
+      ? firstAff?.availableSlots?.length
+        ? firstAff.availableSlots
+        : ["05:00 PM", "06:00 PM", "07:00 PM", "08:00 PM"]
+      : doc.independentSlots?.length
+        ? doc.independentSlots
+        : ["05:00 PM", "06:00 PM", "07:00 PM", "08:00 PM"];
+    setBookingSlot(initialSlots[0] || "06:00 PM");
   };
 
   const handleBookAppointment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!bookingDoctor) return;
     if (!bookingDate) {
-      setBookingError('Please select a preferred appointment date.');
+      setBookingError("Please select a preferred appointment date.");
       return;
     }
     setBookingError(null);
@@ -379,36 +534,52 @@ export const PatientPortal: React.FC = () => {
       const selectedWs =
         bookingWorkspaceId ||
         bookingDoctor.affiliations?.[0]?.workspaceId ||
-        'INDEPENDENT_CHAMBER';
-      const res = await apiRequest('/patient/appointments', {
-        method: 'POST',
+        "INDEPENDENT_CHAMBER";
+      const res = await apiRequest("/patient/appointments", {
+        method: "POST",
         body: {
           doctorId: bookingDoctor.id,
           workspaceId: selectedWs,
           appointmentDate: bookingDate,
           timeSlot: bookingSlot,
-          reason: bookingReason.trim() || 'Specialist Consultation',
+          reason: bookingReason.trim() || "Specialist Consultation",
         },
       });
-      showFeedback('success', res.message);
+      showFeedback("success", res.message);
       setBookingDoctor(null);
-      setBookingReason('');
+      setBookingReason("");
       setBookingError(null);
       await loadCoreData();
     } catch (err: any) {
-      const msg = err.message || 'Unable to submit appointment request.';
+      const msg = err.message || "Unable to submit appointment request.";
       setBookingError(msg);
-      showFeedback('error', msg);
+      showFeedback("error", msg);
     } finally {
       setBookingSubmitting(false);
+    }
+  };
+
+  const handleCancelAppointment = async (appointmentId: string) => {
+    try {
+      const res = await apiRequest(
+        `/patient/appointments/${appointmentId}/cancel`,
+        {
+          method: "PATCH",
+          body: { reason: "Cancelled from Patient Dashboard" },
+        },
+      );
+      showFeedback("success", res.message);
+      await loadCoreData();
+    } catch (err: any) {
+      showFeedback("error", err.message || "Unable to cancel appointment.");
     }
   };
 
   const handleSendFamilyInvite = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const res = await apiRequest('/patient/family/invite', {
-        method: 'POST',
+      const res = await apiRequest("/patient/family/invite", {
+        method: "POST",
         body: {
           targetIdentifier: famTargetId,
           direction: famDirection,
@@ -416,76 +587,76 @@ export const PatientPortal: React.FC = () => {
           relationshipLabel: famLabel,
         },
       });
-      showFeedback('success', res.message);
-      setFamTargetId('');
+      showFeedback("success", res.message);
+      setFamTargetId("");
       setAddFamilyModalOpen(false);
       await Promise.all([loadCoreData(), refreshUserContext()]);
     } catch (err: any) {
-      showFeedback('error', err.message);
+      showFeedback("error", err.message);
     }
   };
 
   const handleToggleFamilyStatus = async (
     relId: string,
-    status: 'ACTIVE' | 'REVOKED'
+    status: "ACTIVE" | "REVOKED",
   ) => {
     try {
       const res = await apiRequest(`/patient/family/${relId}/status`, {
-        method: 'PATCH',
+        method: "PATCH",
         body: { status },
       });
-      showFeedback('success', res.message);
+      showFeedback("success", res.message);
       await Promise.all([
         loadCoreData(),
         refreshUserContext(),
         refreshUnreadCount(),
       ]);
     } catch (err: any) {
-      showFeedback('error', err.message);
+      showFeedback("error", err.message);
     }
   };
 
   const handleRespondStaffInvite = async (
     memberId: string,
-    action: 'ACCEPT' | 'REVOKE'
+    action: "ACCEPT" | "REVOKE",
   ) => {
     try {
       const res = await apiRequest(
         `/patient/staff-invitations/${memberId}/respond`,
         {
-          method: 'PATCH',
+          method: "PATCH",
           body: { action },
-        }
+        },
       );
-      showFeedback('success', res.message);
+      showFeedback("success", res.message);
       await Promise.all([
         loadCoreData(),
         refreshUserContext(),
         refreshUnreadCount(),
       ]);
     } catch (err: any) {
-      showFeedback('error', err.message);
+      showFeedback("error", err.message);
     }
   };
 
   const handleMarkAllNotificationsRead = async () => {
     try {
-      await apiRequest('/notifications/read-all', {
-        method: 'POST',
+      await apiRequest("/notifications/read-all", {
+        method: "POST",
         body: {
           actingPatientId: actingPatientId || undefined,
-          persona: 'PATIENT',
+          persona: "PATIENT",
         },
       });
       await Promise.all([loadCoreData(), refreshUnreadCount()]);
     } catch (err: any) {
-      showFeedback('error', err.message);
+      showFeedback("error", err.message);
     }
   };
 
   const handleMarkOneRead = async (id: string) => {
     try {
-      await apiRequest(`/notifications/${id}/read`, { method: 'PATCH' });
+      await apiRequest(`/notifications/${id}/read`, { method: "PATCH" });
       await Promise.all([loadCoreData(), refreshUnreadCount()]);
     } catch {
       // ignore
@@ -495,25 +666,28 @@ export const PatientPortal: React.FC = () => {
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const res = await apiRequest('/patient/profile', {
-        method: 'PATCH',
+      const res = await apiRequest("/patient/profile", {
+        method: "PATCH",
         body: {
           name: profName,
           phone: profPhone,
           newPassword: profNewPassword || undefined,
           nationalId: profNid || undefined,
           bloodGroup: profBloodGroup,
+          gender: profGender,
+          dateOfBirth: profDob,
+          emergencyContact: profEmergencyContact,
           address: profAddress,
           profileAvatar: profAvatar || undefined,
           secondaryEmails,
           secondaryPhones,
         },
       });
-      showFeedback('success', res.message);
-      setProfNewPassword('');
+      showFeedback("success", res.message);
+      setProfNewPassword("");
       await Promise.all([loadCoreData(), refreshUserContext()]);
     } catch (err: any) {
-      showFeedback('error', err.message);
+      showFeedback("error", err.message);
     }
   };
 
@@ -522,7 +696,7 @@ export const PatientPortal: React.FC = () => {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
-      if (typeof reader.result === 'string') {
+      if (typeof reader.result === "string") {
         setProfAvatar(reader.result);
       }
     };
@@ -535,31 +709,71 @@ export const PatientPortal: React.FC = () => {
     const dependents = (familyData.maintainedDependents || []).map(
       (rel: any) => ({
         id: rel.id,
-        roleKind: 'DEPENDENT' as const,
+        roleKind: "DEPENDENT" as const,
         personId: rel.dependent?.id,
         name: rel.dependent?.name,
         uniqueId: rel.dependent?.uniqueId,
-        accountType: rel.dependent?.accountType || 'CHILD',
-        relationshipLabel: rel.relationshipLabel || 'Dependent',
+        accountType: rel.dependent?.accountType || "CHILD",
+        bloodGroup: rel.dependent?.bloodGroup || null,
+        dateOfBirth: rel.dependent?.dateOfBirth || null,
+        relationshipLabel: rel.relationshipLabel || "Dependent",
         status: rel.status,
         vaultCount: rel.dependent?._count?.vaultDocuments ?? 0,
-      })
+        appointmentCount: rel.dependent?._count?.appointments ?? 0,
+      }),
     );
     const maintainers = (familyData.managedByMaintainers || []).map(
       (rel: any) => ({
         id: rel.id,
-        roleKind: 'MAINTAINER' as const,
+        roleKind: "MAINTAINER" as const,
         personId: rel.maintainer?.id,
         name: rel.maintainer?.name,
         uniqueId: rel.maintainer?.uniqueId,
-        accountType: 'NORMAL',
-        relationshipLabel: `${rel.relationshipLabel || 'Family'} (Maintainer)`,
+        accountType: "NORMAL",
+        bloodGroup: null,
+        dateOfBirth: null,
+        relationshipLabel: `${rel.relationshipLabel || "Family"} (Maintainer)`,
         status: rel.status,
         vaultCount: null,
-      })
+        appointmentCount: null,
+      }),
     );
     return [...dependents, ...maintainers];
   }, [familyData]);
+
+  // Filtered Appointments for Appointments Section
+  const filteredAppointments = useMemo(() => {
+    return appointments.filter((apt: any) => {
+      if (aptStatusFilter === "UPCOMING") {
+        if (!["PENDING", "APPROVED", "RESCHEDULED"].includes(apt.status)) {
+          return false;
+        }
+      } else if (aptStatusFilter === "COMPLETED") {
+        if (apt.status !== "COMPLETED") return false;
+      } else if (aptStatusFilter === "CANCELLED") {
+        if (apt.status !== "CANCELLED") return false;
+      }
+
+      if (aptSearch.trim()) {
+        const q = aptSearch.trim().toLowerCase();
+        const docName = (apt.doctor?.patientUser?.name || "").toLowerCase();
+        const wsName = (
+          apt.workspace?.name || "independent personal chamber"
+        ).toLowerCase();
+        const code = (apt.appointmentCode || "").toLowerCase();
+        const reason = (apt.reason || "").toLowerCase();
+        if (
+          !docName.includes(q) &&
+          !wsName.includes(q) &&
+          !code.includes(q) &&
+          !reason.includes(q)
+        ) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [appointments, aptStatusFilter, aptSearch]);
 
   // Unified Notifications + Actionable Invitations Rows
   const unifiedNotificationRows = useMemo(() => {
@@ -568,18 +782,18 @@ export const PatientPortal: React.FC = () => {
     // 1. Actionable Hospital Staff Invitations (only when viewing own account)
     if (!actingPatientId) {
       for (const inv of staffInvites) {
-        if (inv.invitationStatus === 'PENDING') {
+        if (inv.invitationStatus === "PENDING") {
           rows.push({
             rowId: `staff-inv-${inv.id}`,
-            kind: 'STAFF_INVITE',
+            kind: "STAFF_INVITE",
             isInvitation: true,
             isUnread: true,
-            category: 'Hospital Staff Invitation',
-            title: `${inv.workspace?.name || 'Hospital'} — Staff Role Invitation`,
+            category: "Hospital Staff Invitation",
+            title: `${inv.workspace?.name || "Hospital"} — Staff Role Invitation`,
             message: `Invited as ${
-              inv.assignedRoles?.map((r: any) => r.role.name).join(', ') ||
+              inv.assignedRoles?.map((r: any) => r.role.name).join(", ") ||
               inv.staffTitle ||
-              'Staff'
+              "Staff"
             }`,
             createdAt: inv.createdAt,
             memberId: inv.id,
@@ -590,16 +804,16 @@ export const PatientPortal: React.FC = () => {
 
     // 2. Actionable Pending Family Link Invitations
     for (const fam of unifiedFamilyRows) {
-      if (fam.status === 'PENDING') {
+      if (fam.status === "PENDING") {
         rows.push({
           rowId: `fam-inv-${fam.id}`,
-          kind: 'FAMILY_INVITE',
+          kind: "FAMILY_INVITE",
           isInvitation: true,
           isUnread: true,
-          category: 'Family Invitation',
+          category: "Family Invitation",
           title: `Family Account Link — ${fam.name} (${fam.uniqueId})`,
           message:
-            fam.roleKind === 'DEPENDENT'
+            fam.roleKind === "DEPENDENT"
               ? `Pending link to manage ${fam.name} (${fam.relationshipLabel}).`
               : `${fam.name} requested maintainer access (${fam.relationshipLabel}).`,
           createdAt: new Date().toISOString(),
@@ -611,26 +825,27 @@ export const PatientPortal: React.FC = () => {
     // 3. Persistent Notifications
     for (const n of notifications) {
       const isInvType =
-        n.type === 'STAFF_INVITATION' ||
-        n.type === 'FAMILY_INVITE' ||
-        n.type === 'DOCTOR_AFFILIATION';
+        n.type === "STAFF_INVITATION" ||
+        n.type === "FAMILY_INVITE" ||
+        n.type === "FAMILY_INVITATION" ||
+        n.type === "DOCTOR_AFFILIATION";
       rows.push({
         rowId: `notif-${n.id}`,
         notifId: n.id,
-        kind: 'NOTIFICATION',
+        kind: "NOTIFICATION",
         isInvitation: isInvType,
         isUnread: !n.isRead,
-        category: n.type ? n.type.replace(/_/g, ' ') : 'Update',
+        category: n.type ? n.type.replace(/_/g, " ") : "Update",
         title: n.title,
         message: n.message,
         createdAt: n.createdAt,
       });
     }
 
-    if (notifFilter === 'INVITATIONS') {
+    if (notifFilter === "INVITATIONS") {
       return rows.filter((r) => r.isInvitation);
     }
-    if (notifFilter === 'UNREAD') {
+    if (notifFilter === "UNREAD") {
       return rows.filter((r) => r.isUnread);
     }
     return rows;
@@ -643,165 +858,269 @@ export const PatientPortal: React.FC = () => {
   ]);
 
   const patient = dashboard?.patient;
+  const vaultSummary = dashboard?.vaultSummary;
+  const activeMedications: any[] = vaultSummary?.activeMedications || [];
+  const recentLabHighlights: any[] = vaultSummary?.recentLabHighlights || [];
+  const recentActivityLogs: any[] = dashboard?.recentActivityLogs || [];
+
+  const upcomingAppointmentsList = useMemo(
+    () =>
+      appointments.filter((a: any) =>
+        ["PENDING", "APPROVED", "RESCHEDULED"].includes(a.status),
+      ),
+    [appointments],
+  );
+
+  // Selected chamber details in Request Appointment modal
+  const selectedBookingChamber = useMemo(() => {
+    if (!bookingDoctor) return null;
+    if (!bookingWorkspaceId || bookingWorkspaceId === "INDEPENDENT_CHAMBER") {
+      const indepSlots: string[] =
+        Array.isArray(bookingDoctor.independentSlots) &&
+        bookingDoctor.independentSlots.length > 0
+          ? bookingDoctor.independentSlots
+          : ["05:00 PM", "06:00 PM", "07:00 PM", "08:00 PM"];
+      return {
+        name: "Independent Personal Chamber",
+        area: bookingDoctor.area || "Direct Consultation",
+        fee: Number(bookingDoctor.defaultConsultationFee || 1000),
+        schedule:
+          bookingDoctor.independentSchedule ||
+          "Sat, Mon, Wed: 5:00 PM - 9:00 PM",
+        availableSlots: indepSlots,
+        roomNumber: null,
+      };
+    }
+    const found = (bookingDoctor.affiliations || []).find(
+      (a: any) => a.workspaceId === bookingWorkspaceId,
+    );
+    if (!found) return null;
+    const affSlots: string[] =
+      Array.isArray(found.availableSlots) && found.availableSlots.length > 0
+        ? found.availableSlots
+        : ["05:00 PM", "06:00 PM", "07:00 PM", "08:00 PM"];
+    return {
+      name: found.workspaceName,
+      area: found.area || "Hospital Chamber",
+      fee: Number(found.consultationFee || 1000),
+      schedule: found.schedule || "Standard Hours",
+      availableSlots: affSlots,
+      roomNumber: found.roomNumber || null,
+    };
+  }, [bookingDoctor, bookingWorkspaceId]);
+
+  useEffect(() => {
+    if (!selectedBookingChamber) return;
+    const slots = selectedBookingChamber.availableSlots || [];
+    if (slots.length > 0 && !slots.includes(bookingSlot)) {
+      setBookingSlot(slots[0]);
+    }
+  }, [selectedBookingChamber, bookingSlot]);
+
+  // Profile completeness calculation
+  const profileCompleteness = useMemo(() => {
+    if (!patient) return 100;
+    const checks = [
+      Boolean(patient.name),
+      Boolean(patient.phone),
+      Boolean(patient.bloodGroup),
+      Boolean(patient.gender),
+      Boolean(patient.dateOfBirth),
+      Boolean(patient.nationalId),
+      Boolean(patient.address),
+      Boolean(patient.emergencyContact),
+    ];
+    const done = checks.filter(Boolean).length;
+    return Math.round((done / checks.length) * 100);
+  }, [patient]);
+
+  const patientAge = calculateAgeFromDob(patient?.dateOfBirth);
 
   return (
     <div className="space-y-6">
       {/* Proxy Account Banner (Only when managing a Child or Senior Dependent) */}
       {actingPatientId && patient && (
         <div className="rounded-md bg-brand-50 border border-brand-200 px-4 py-3 flex flex-wrap items-center justify-between gap-3 text-sm">
-          <div>
-            <span className="font-semibold text-brand-900">
-              Managing Family Account:{' '}
-            </span>
-            <span className="text-brand-800">
-              {patient.name} ({patient.uniqueId})
-            </span>
+          <div className="flex items-center gap-2.5">
+            <UserCheck className="w-4 h-4 text-brand-700 shrink-0" />
+            <div>
+              <span className="font-semibold text-brand-900">
+                Managing Family Account:{" "}
+              </span>
+              <span className="text-brand-800 font-medium">
+                {patient.name} ({patient.uniqueId})
+              </span>
+              {patient.accountType && (
+                <span className="ml-2">
+                  <StatusBadge label={patient.accountType} tone="brand" />
+                </span>
+              )}
+            </div>
           </div>
           <button
             type="button"
             onClick={() => setActingPatientId(null)}
-            className="btn-secondary"
+            className="btn-secondary !py-1"
           >
             Switch Back to My Account
           </button>
         </div>
       )}
 
-      {/* Feedback Banner */}
-      {feedback && (
-        <div
-          role="status"
-          className={`rounded-md border px-4 py-3 text-sm font-medium flex items-center justify-between gap-3 ${
-            feedback.type === 'success'
-              ? 'bg-brand-50 border-brand-200 text-brand-800'
-              : 'bg-accent-50 border-accent-100 text-accent-600'
-          }`}
-        >
-          <span>{feedback.text}</span>
-          <button
-            type="button"
-            onClick={() => setFeedback(null)}
-            className="text-xs underline shrink-0"
-          >
-            Dismiss
-          </button>
-        </div>
-      )}
+      {/* Auto-Dismissing Feedback Notification */}
+      <TransientToast
+        notification={feedback}
+        onDismiss={() => setFeedback(null)}
+      />
 
       {/* =================================================================== */}
-      {/* 1. OVERVIEW                                                         */}
+      {/* 1. OVERVIEW (CLEAN INSTITUTIONAL DASHBOARD)                         */}
       {/* =================================================================== */}
-      {activeSection === 'overview' && (
+      {activeSection === "overview" && (
         <div className="space-y-6">
+          {/* Clean Institutional Header */}
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h1 className="text-2xl font-semibold text-ink">Overview</h1>
-              {patient && (
-                <p className="text-sm text-mut mt-0.5">
-                  {patient.name} ·{' '}
-                  <span className="font-mono text-ink-2">
+              <div className="flex flex-wrap items-center gap-2.5">
+                <h1 className="text-2xl font-semibold text-ink">Overview</h1>
+                {patient?.uniqueId && (
+                  <span className="font-mono text-xs rounded bg-paper border border-line px-2 py-0.5 text-ink-2">
                     {patient.uniqueId}
                   </span>
-                  {patient.bloodGroup ? ` · Blood Group ${patient.bloodGroup}` : ''}
-                </p>
-              )}
+                )}
+                {patient?.accountType && patient.accountType !== "NORMAL" && (
+                  <StatusBadge label={patient.accountType} tone="brand" />
+                )}
+              </div>
+              <p className="text-sm text-mut mt-0.5">
+                {patient?.name || "Patient Account"}
+                {patient?.bloodGroup ? (
+                  <>
+                    {" · Blood "}
+                    <span className="font-mono font-semibold text-brand-700">
+                      {patient.bloodGroup}
+                    </span>
+                  </>
+                ) : null}
+                {patientAge ? ` · ${patientAge}` : ""}
+                {patient?.phone ? (
+                  <>
+                    {" · "}
+                    <span className="font-mono text-ink-2">
+                      {patient.phone}
+                    </span>
+                  </>
+                ) : null}
+              </p>
             </div>
-            <div className="flex items-center gap-2">
+
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
-                onClick={() => setActiveSection('doctors')}
-                className="btn-secondary"
+                onClick={() => handleGenerateQr(true)}
+                className="btn-primary"
+                title="Generate a 2-hour consultation QR sharing your clinical vault"
               >
-                Find a Doctor
+                <QrCode className="w-4 h-4" />
+                <span>Instant Consultation QR</span>
               </button>
               <button
                 type="button"
-                onClick={() => setActiveSection('records')}
-                className="btn-primary"
+                onClick={() => setActiveSection("doctors")}
+                className="btn-secondary"
               >
-                Medical Records
+                <Calendar className="w-4 h-4" />
+                <span>Book Doctor</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setUploadModalOpen(true)}
+                className="btn-secondary"
+              >
+                <FilePlus2 className="w-4 h-4" />
+                <span>Add Record</span>
               </button>
             </div>
           </div>
 
-          {/* Hospital Health Packages as Cards at the Top */}
-          {(workspacesData?.featuredPackages?.length ?? 0) > 0 && (
-            <section className="space-y-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <h2 className="text-base font-semibold text-ink">
-                    Hospital Health & Diagnostic Packages
-                  </h2>
-                  <p className="text-xs text-mut">
-                    Preventive checkup packages offered by DGHS-approved
-                    hospitals and diagnostic centers.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setActiveSection('hospitals')}
-                  className="btn-secondary"
-                >
-                  View All Packages ({workspacesData.featuredPackages.length})
-                </button>
-              </div>
-              <div className="package-card-grid">
-                {workspacesData.featuredPackages.slice(0, 3).map((pkg: any) => (
-                  <HealthPackageCard
-                    key={pkg.id}
-                    pkg={pkg}
-                    onViewHospital={(name) => {
-                      setDocWorkspaceFilter(name);
-                      setActiveSection('doctors');
-                    }}
-                  />
-                ))}
-              </div>
-            </section>
-          )}
-
-          {/* 4 Clean Summary Boxes */}
+          {/* 4 KPI Stat Boxes */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="bg-paper border border-line rounded-md p-4">
-              <div className="text-sm text-mut">Medical Records</div>
+            <button
+              type="button"
+              onClick={() => setActiveSection("records")}
+              className="text-left bg-paper border border-line hover:border-brand-400 rounded-md p-4 transition-colors"
+            >
+              <div className="text-sm text-mut">Medical Vault Records</div>
               <div className="text-2xl font-semibold text-ink font-mono mt-1">
-                {vaultDocs.length}
+                {vaultSummary?.total ?? vaultDocs.length}
               </div>
-            </div>
-            <div className="bg-paper border border-line rounded-md p-4">
+              <div className="text-xs text-mut mt-1 font-mono">
+                {vaultSummary
+                  ? `${vaultSummary.prescriptions} Rx · ${vaultSummary.labReports} Lab · ${vaultSummary.billingDocs} Bills`
+                  : "View & share records"}
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveSection("appointments")}
+              className="text-left bg-paper border border-line hover:border-brand-400 rounded-md p-4 transition-colors"
+            >
               <div className="text-sm text-mut">Upcoming Appointments</div>
               <div className="text-2xl font-semibold text-ink font-mono mt-1">
-                {
-                  appointments.filter((a: any) =>
-                    ['PENDING', 'APPROVED'].includes(a.status)
-                  ).length
-                }
+                {upcomingAppointmentsList.length}
               </div>
-            </div>
-            <div className="bg-paper border border-line rounded-md p-4">
+              <div className="text-xs text-mut mt-1 truncate">
+                {upcomingAppointmentsList[0]
+                  ? `Next: ${upcomingAppointmentsList[0].appointmentDate} (${upcomingAppointmentsList[0].timeSlot})`
+                  : "No active bookings"}
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveSharesModalOpen(true)}
+              className="text-left bg-paper border border-line hover:border-brand-400 rounded-md p-4 transition-colors"
+            >
               <div className="text-sm text-mut">Active Shared QR</div>
               <div className="text-2xl font-semibold text-brand-700 font-mono mt-1">
                 {activeQrSessions.length}
               </div>
-            </div>
-            <div className="bg-paper border border-line rounded-md p-4">
-              <div className="text-sm text-mut">Family Members</div>
+              <div className="text-xs text-mut mt-1 font-mono">
+                {activeQrSessions[0]
+                  ? `${activeQrSessions[0].shortCode} · ${formatRemainingTime(activeQrSessions[0].expiresAt, nowTick)}`
+                  : "No active 2h share"}
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveSection("family")}
+              className="text-left bg-paper border border-line hover:border-brand-400 rounded-md p-4 transition-colors"
+            >
+              <div className="text-sm text-mut">Family Accounts</div>
               <div className="text-2xl font-semibold text-ink font-mono mt-1">
                 {unifiedFamilyRows.length}
               </div>
-            </div>
+              <div className="text-xs text-mut mt-1">
+                {actingPatientId
+                  ? "Proxy session active"
+                  : `${unifiedFamilyRows.filter((f) => f.status === "ACTIVE").length} active linked member(s)`}
+              </div>
+            </button>
           </div>
 
-          {/* Upcoming Appointments List */}
+          {/* 1. Upcoming Appointments DataList */}
           <DataList
             title="Upcoming Appointments"
-            data={appointments.slice(0, 5)}
+            data={upcomingAppointmentsList.slice(0, 5)}
+            paginate={false}
             getRowId={(r: any) => r.id}
-            emptyMessage="No scheduled appointments."
+            emptyMessage="No upcoming appointments scheduled."
             headerActions={
               <button
                 type="button"
-                onClick={() => setActiveSection('appointments')}
+                onClick={() => setActiveSection("appointments")}
                 className="btn-secondary"
               >
                 View All Appointments
@@ -809,12 +1128,12 @@ export const PatientPortal: React.FC = () => {
             }
             columns={[
               {
-                key: 'doctor',
-                header: 'Doctor',
+                key: "doctor",
+                header: "Doctor",
                 render: (apt: any) => (
                   <div>
-                    <div className="font-medium text-ink">
-                      {apt.doctor?.patientUser?.name || 'Specialist'}
+                    <div className="font-semibold text-ink">
+                      {apt.doctor?.patientUser?.name || "Specialist"}
                     </div>
                     <div className="text-xs text-mut">
                       {apt.doctor?.specialty}
@@ -823,17 +1142,24 @@ export const PatientPortal: React.FC = () => {
                 ),
               },
               {
-                key: 'facility',
-                header: 'Hospital / Chamber',
+                key: "facility",
+                header: "Hospital / Chamber",
                 render: (apt: any) => (
-                  <span>
-                    {apt.workspace?.name || 'Independent Personal Chamber'}
-                  </span>
+                  <div>
+                    <div className="font-medium text-ink">
+                      {apt.workspace?.name || "Independent Personal Chamber"}
+                    </div>
+                    <div className="text-xs text-mut font-mono">
+                      Fee: {Number(apt.consultationFee || 0).toLocaleString()}{" "}
+                      Tk
+                      {apt.serialNumber ? ` · Serial #${apt.serialNumber}` : ""}
+                    </div>
+                  </div>
                 ),
               },
               {
-                key: 'schedule',
-                header: 'Date & Time',
+                key: "schedule",
+                header: "Date & Configured Slot",
                 render: (apt: any) => (
                   <span className="font-mono text-sm">
                     {apt.appointmentDate} · {apt.timeSlot}
@@ -841,23 +1167,43 @@ export const PatientPortal: React.FC = () => {
                 ),
               },
               {
-                key: 'status',
-                header: 'Status',
+                key: "status",
+                header: "Status",
                 render: (apt: any) => <StatusBadge label={apt.status} />,
+              },
+              {
+                key: "actions",
+                header: "Actions",
+                align: "right",
+                render: (apt: any) =>
+                  ["PENDING", "APPROVED", "RESCHEDULED"].includes(
+                    apt.status,
+                  ) ? (
+                    <button
+                      type="button"
+                      onClick={() => handleCancelAppointment(apt.id)}
+                      className="btn-danger !px-2.5 !py-1 text-xs"
+                    >
+                      Cancel
+                    </button>
+                  ) : (
+                    <span className="text-xs text-mut">—</span>
+                  ),
               },
             ]}
           />
 
-          {/* Recent Medical Records List */}
+          {/* 2. Recent Medical Records DataList */}
           <DataList
             title="Recent Medical Records"
             data={(dashboard?.recentVaultDocs || vaultDocs).slice(0, 5)}
+            paginate={false}
             getRowId={(r: any) => r.id}
             emptyMessage="No medical records in your account yet."
             headerActions={
               <button
                 type="button"
-                onClick={() => setActiveSection('records')}
+                onClick={() => setActiveSection("records")}
                 className="btn-secondary"
               >
                 View All Records
@@ -865,8 +1211,8 @@ export const PatientPortal: React.FC = () => {
             }
             columns={[
               {
-                key: 'code',
-                header: 'Record Code',
+                key: "code",
+                header: "Record Code",
                 render: (doc: any) => (
                   <div className="space-y-0.5">
                     <div className="font-mono text-xs text-ink-2">
@@ -877,8 +1223,8 @@ export const PatientPortal: React.FC = () => {
                 ),
               },
               {
-                key: 'title',
-                header: 'Title',
+                key: "title",
+                header: "Title",
                 render: (doc: any) => (
                   <div>
                     <div className="font-medium text-ink">{doc.title}</div>
@@ -889,26 +1235,26 @@ export const PatientPortal: React.FC = () => {
                 ),
               },
               {
-                key: 'source',
-                header: 'Clinician / Facility',
+                key: "source",
+                header: "Clinician / Facility",
                 render: (doc: any) => (
                   <div className="text-sm">
                     <div>
                       {doc.doctor?.patientUser?.name ||
                         doc.doctorNameSnapshot ||
-                        'Clinical Staff'}
+                        "Clinical Staff"}
                     </div>
                     <div className="text-xs text-mut">
                       {doc.workspace?.name ||
                         doc.workspaceNameSnapshot ||
-                        'Independent Chamber'}
+                        "Independent Chamber"}
                     </div>
                   </div>
                 ),
               },
               {
-                key: 'date',
-                header: 'Date',
+                key: "date",
+                header: "Date",
                 render: (doc: any) => (
                   <span className="font-mono text-sm text-mut">
                     {new Date(doc.createdAt).toLocaleDateString()}
@@ -916,9 +1262,9 @@ export const PatientPortal: React.FC = () => {
                 ),
               },
               {
-                key: 'actions',
-                header: 'Actions',
-                align: 'right',
+                key: "actions",
+                header: "Actions",
+                align: "right",
                 render: (doc: any) => (
                   <div className="inline-flex items-center justify-end gap-1.5">
                     <button
@@ -942,25 +1288,190 @@ export const PatientPortal: React.FC = () => {
               },
             ]}
           />
+
+          {/* 3. Hospital Health & Diagnostic Packages (Clean Institutional DataList) */}
+          {(workspacesData?.featuredPackages?.length ?? 0) > 0 && (
+            <DataList
+              title="Hospital Health & Diagnostic Packages"
+              subtitle="Preventive checkup packages offered by DGHS-approved hospitals and diagnostic centers."
+              data={workspacesData.featuredPackages.slice(0, 4)}
+              paginate={false}
+              getRowId={(pkg: any) => pkg.id}
+              emptyMessage="No active health packages available."
+              headerActions={
+                <button
+                  type="button"
+                  onClick={() => setActiveSection("hospitals")}
+                  className="btn-secondary"
+                >
+                  View All Packages ({workspacesData.featuredPackages.length})
+                </button>
+              }
+              columns={[
+                {
+                  key: "package",
+                  header: "Package Name",
+                  render: (pkg: any) => (
+                    <div>
+                      <div className="font-semibold text-ink">{pkg.title}</div>
+                      <div className="text-xs text-mut">
+                        {pkg.durationLabel || "Same Day Delivery"}
+                        {pkg.packageCode ? ` · ${pkg.packageCode}` : ""}
+                      </div>
+                    </div>
+                  ),
+                },
+                {
+                  key: "facility",
+                  header: "Hospital / Facility",
+                  render: (pkg: any) => (
+                    <div>
+                      <div className="font-medium text-ink">
+                        {pkg.workspace?.name || "Registered Facility"}
+                      </div>
+                      {pkg.workspace?.area && (
+                        <div className="text-xs text-mut">
+                          {pkg.workspace.area}
+                        </div>
+                      )}
+                    </div>
+                  ),
+                },
+                {
+                  key: "tests",
+                  header: "Included Investigations",
+                  render: (pkg: any) => {
+                    const tests: string[] = Array.isArray(pkg.includedTests)
+                      ? pkg.includedTests
+                      : [];
+                    return (
+                      <div className="text-xs text-ink-2 max-w-md">
+                        <span className="font-mono font-semibold text-brand-700">
+                          {tests.length || 1} Tests:
+                        </span>{" "}
+                        {tests.slice(0, 4).join(", ")}
+                        {tests.length > 4 ? ` (+${tests.length - 4} more)` : ""}
+                      </div>
+                    );
+                  },
+                },
+                {
+                  key: "price",
+                  header: "Package Fee",
+                  render: (pkg: any) => {
+                    const price = Number(pkg.price || 0);
+                    const orig = Number(pkg.originalPrice || 0);
+                    return (
+                      <div className="font-mono">
+                        <div className="font-semibold text-brand-700">
+                          {price.toLocaleString()} Tk
+                        </div>
+                        {orig > price && (
+                          <div className="text-xs text-mut line-through">
+                            {orig.toLocaleString()} Tk
+                          </div>
+                        )}
+                      </div>
+                    );
+                  },
+                },
+                {
+                  key: "actions",
+                  header: "Actions",
+                  align: "right",
+                  render: (pkg: any) => (
+                    <div className="inline-flex items-center justify-end gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setInspectedPackage(pkg)}
+                        className="btn-secondary !px-2.5 !py-1 text-xs"
+                      >
+                        Details
+                      </button>
+                      {pkg.workspace?.name && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDocWorkspaceFilter(pkg.workspace.name);
+                            setActiveSection("doctors");
+                          }}
+                          className="btn-primary !px-2.5 !py-1 text-xs"
+                        >
+                          Doctors
+                        </button>
+                      )}
+                    </div>
+                  ),
+                },
+              ]}
+            />
+          )}
         </div>
       )}
 
       {/* =================================================================== */}
-      {/* 2. MEDICAL RECORDS (SELECTABLE LIST + GENERATE QR POPUP + PDF)      */}
+      {/* 2. MEDICAL RECORDS (SELECTABLE LIST + GENERATE QR POPUP + UPLOAD)   */}
       {/* =================================================================== */}
-      {activeSection === 'records' && (
+      {activeSection === "records" && (
         <div className="space-y-5">
-          <div>
-            <h1 className="text-2xl font-semibold text-ink">Medical Records</h1>
-            <p className="text-sm text-mut mt-0.5">
-              Select one, several, or all records and click Generate QR to share
-              temporary 2-hour access with your doctor, or download any record
-              as PDF.
-            </p>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h1 className="text-2xl font-semibold text-ink">
+                Medical Records
+              </h1>
+              <p className="text-sm text-mut mt-0.5">
+                Select specific records or generate an instant 2-hour
+                consultation QR code for your doctor, upload external records,
+                or download official PDFs.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setUploadModalOpen(true)}
+              className="btn-secondary"
+            >
+              <FilePlus2 className="w-4 h-4" />
+              <span>Add External Record</span>
+            </button>
+          </div>
+
+          {/* Quick Type Filter Pills */}
+          <div className="flex flex-wrap items-center gap-2">
+            {[
+              {
+                value: "",
+                label: `All Records (${vaultSummary?.total ?? vaultDocs.length})`,
+              },
+              {
+                value: "PRESCRIPTION",
+                label: `Prescriptions (${vaultSummary?.prescriptions ?? vaultDocs.filter((d) => d.type === "PRESCRIPTION").length})`,
+              },
+              {
+                value: "LAB_REPORT",
+                label: `Lab Reports (${vaultSummary?.labReports ?? vaultDocs.filter((d) => d.type === "LAB_REPORT").length})`,
+              },
+              {
+                value: "BILLING_DOC",
+                label: `Billing Invoices (${vaultSummary?.billingDocs ?? vaultDocs.filter((d) => d.type === "BILLING_DOC").length})`,
+              },
+            ].map((pill) => (
+              <button
+                key={pill.value}
+                type="button"
+                onClick={() => setVaultTypeFilter(pill.value)}
+                className={
+                  vaultTypeFilter === pill.value
+                    ? "btn-primary !py-1.5 text-xs"
+                    : "btn-secondary !py-1.5 text-xs"
+                }
+              >
+                {pill.label}
+              </button>
+            ))}
           </div>
 
           <DataList
-            title={`All Records (${vaultDocs.length})`}
+            title={`Vault Documents (${vaultDocs.length})`}
             selectable={true}
             selectedIds={selectedDocIds}
             onToggleRow={handleToggleDocRow}
@@ -982,35 +1493,40 @@ export const PatientPortal: React.FC = () => {
                     type="button"
                     onClick={() =>
                       handleToggleAllDocs(
-                        selectedDocIds.length < vaultDocs.length
+                        selectedDocIds.length < vaultDocs.length,
                       )
                     }
                     className="btn-secondary"
                   >
                     {selectedDocIds.length === vaultDocs.length &&
                     vaultDocs.length > 0
-                      ? 'Clear Selection'
-                      : 'Select All'}
+                      ? "Clear Selection"
+                      : "Select All"}
                   </button>
                 )}
                 <button
                   type="button"
-                  disabled={selectedDocIds.length === 0}
-                  onClick={handleGenerateQr}
+                  onClick={() => handleGenerateQr(selectedDocIds.length === 0)}
                   className="btn-primary"
                 >
                   <QrCode className="w-4 h-4" />
                   <span>
-                    Generate QR
                     {selectedDocIds.length > 0
-                      ? ` (${selectedDocIds.length})`
-                      : ''}
+                      ? `Generate QR (${selectedDocIds.length} Selected)`
+                      : "Share All / Consultation QR"}
                   </span>
                 </button>
               </>
             }
             toolbar={
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+                <input
+                  type="search"
+                  value={vaultSearch}
+                  onChange={(e) => setVaultSearch(e.target.value)}
+                  placeholder="Search title, code, summary..."
+                  className="rounded-md border border-line bg-paper px-3 py-1.5 text-sm text-ink"
+                />
                 <input
                   type="search"
                   value={vaultDoctorFilter}
@@ -1026,17 +1542,6 @@ export const PatientPortal: React.FC = () => {
                   className="rounded-md border border-line bg-paper px-3 py-1.5 text-sm text-ink"
                 />
                 <select
-                  value={vaultTypeFilter}
-                  onChange={(e) => setVaultTypeFilter(e.target.value)}
-                  aria-label="Filter by document type"
-                  className="rounded-md border border-line bg-paper px-3 py-1.5 text-sm text-ink"
-                >
-                  <option value="">All Record Types</option>
-                  <option value="PRESCRIPTION">Prescriptions</option>
-                  <option value="LAB_REPORT">Laboratory Reports</option>
-                  <option value="BILLING_DOC">Billing Invoices</option>
-                </select>
-                <select
                   value={vaultSortBy}
                   onChange={(e) => setVaultSortBy(e.target.value)}
                   aria-label="Sort medical records"
@@ -1051,11 +1556,16 @@ export const PatientPortal: React.FC = () => {
             }
             columns={[
               {
-                key: 'type',
-                header: 'Type & Code',
+                key: "type",
+                header: "Type & Code",
                 render: (doc: any) => (
                   <div className="space-y-1">
-                    <StatusBadge label={doc.type} />
+                    <div className="flex items-center gap-1">
+                      <StatusBadge label={doc.type} />
+                      {doc.isImmutable && (
+                        <StatusBadge label="Verified" tone="brand" />
+                      )}
+                    </div>
                     <div className="font-mono text-xs text-mut">
                       {doc.documentCode}
                     </div>
@@ -1063,8 +1573,8 @@ export const PatientPortal: React.FC = () => {
                 ),
               },
               {
-                key: 'title',
-                header: 'Document Title',
+                key: "title",
+                header: "Document Title",
                 render: (doc: any) => (
                   <div>
                     <div className="font-medium text-ink">{doc.title}</div>
@@ -1077,30 +1587,30 @@ export const PatientPortal: React.FC = () => {
                 ),
               },
               {
-                key: 'doctor',
-                header: 'Doctor',
+                key: "doctor",
+                header: "Doctor",
                 render: (doc: any) => (
                   <span>
                     {doc.doctor?.patientUser?.name ||
                       doc.doctorNameSnapshot ||
-                      '—'}
+                      "—"}
                   </span>
                 ),
               },
               {
-                key: 'facility',
-                header: 'Facility',
+                key: "facility",
+                header: "Facility",
                 render: (doc: any) => (
                   <span>
                     {doc.workspace?.name ||
                       doc.workspaceNameSnapshot ||
-                      'Independent Chamber'}
+                      "Independent Chamber"}
                   </span>
                 ),
               },
               {
-                key: 'date',
-                header: 'Issued Date',
+                key: "date",
+                header: "Issued Date",
                 render: (doc: any) => (
                   <span className="font-mono text-sm text-mut">
                     {new Date(doc.createdAt).toLocaleDateString()}
@@ -1108,9 +1618,9 @@ export const PatientPortal: React.FC = () => {
                 ),
               },
               {
-                key: 'actions',
-                header: 'Actions',
-                align: 'right',
+                key: "actions",
+                header: "Actions",
+                align: "right",
                 render: (doc: any) => (
                   <div className="inline-flex items-center justify-end gap-1.5">
                     <button
@@ -1140,14 +1650,40 @@ export const PatientPortal: React.FC = () => {
       {/* =================================================================== */}
       {/* 3. DOCTORS (UNIFIED DATALIST + FEE RANGE + AVAILABILITY + POPUP)    */}
       {/* =================================================================== */}
-      {activeSection === 'doctors' && (
+      {activeSection === "doctors" && (
         <div className="space-y-5">
           <div>
             <h1 className="text-2xl font-semibold text-ink">Doctors</h1>
             <p className="text-sm text-mut mt-0.5">
-              Browse verified specialists, consultation fee ranges, and
+              Browse DGHS-verified specialists, consultation fee ranges, and
               available hospital chambers.
             </p>
+          </div>
+
+          {/* Quick Specialty Filter Pills */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            {[
+              "",
+              "Cardiology",
+              "Gynecology",
+              "Orthopedics",
+              "Neurology",
+              "Pediatrics",
+              "General Medicine",
+            ].map((spec) => (
+              <button
+                key={spec || "ALL"}
+                type="button"
+                onClick={() => setDocSpecialtyFilter(spec)}
+                className={
+                  docSpecialtyFilter === spec
+                    ? "btn-primary !py-1 text-xs"
+                    : "btn-secondary !py-1 text-xs"
+                }
+              >
+                {spec || "All Specialties"}
+              </button>
+            ))}
           </div>
 
           <DataList
@@ -1161,7 +1697,7 @@ export const PatientPortal: React.FC = () => {
                   type="search"
                   value={docSearch}
                   onChange={(e) => setDocSearch(e.target.value)}
-                  placeholder="Search doctor name..."
+                  placeholder="Search doctor name or ID..."
                   className="rounded-md border border-line bg-paper px-3 py-1.5 text-sm text-ink"
                 />
                 <input
@@ -1196,8 +1732,8 @@ export const PatientPortal: React.FC = () => {
             }
             columns={[
               {
-                key: 'doctor',
-                header: 'Doctor',
+                key: "doctor",
+                header: "Doctor",
                 render: (doc: any) => (
                   <div className="flex items-center gap-3">
                     {doc.profileImage ? (
@@ -1215,32 +1751,42 @@ export const PatientPortal: React.FC = () => {
                       <div className="font-semibold text-ink">{doc.name}</div>
                       <div className="text-xs text-mut">
                         {doc.degrees?.length
-                          ? doc.degrees.join(', ')
-                          : 'Registered Physician'}
+                          ? doc.degrees.join(", ")
+                          : "Registered Physician"}
                         {doc.experienceYears
                           ? ` · ${doc.experienceYears} yrs exp`
-                          : ''}
+                          : ""}
                       </div>
+                      {doc.customHeadline && (
+                        <div className="text-xs text-brand-700 font-medium mt-0.5">
+                          {doc.customHeadline}
+                        </div>
+                      )}
                     </div>
                   </div>
                 ),
               },
               {
-                key: 'specialty',
-                header: 'Specialty',
+                key: "specialty",
+                header: "Specialty",
                 render: (doc: any) => (
-                  <StatusBadge label={doc.specialty} tone="brand" />
+                  <div className="space-y-1">
+                    <StatusBadge label={doc.specialty} tone="brand" />
+                    <div className="font-mono text-xs text-mut">
+                      {doc.doctorIdCode}
+                    </div>
+                  </div>
                 ),
               },
               {
-                key: 'locations',
-                header: 'Available Locations',
+                key: "locations",
+                header: "Available Locations",
                 render: (doc: any) => {
                   const affs = doc.affiliations || [];
                   if (affs.length === 0) {
                     return (
                       <span className="text-sm text-mut">
-                        {doc.area || 'Independent Chamber'}
+                        {doc.area || "Independent Chamber"}
                       </span>
                     );
                   }
@@ -1253,7 +1799,7 @@ export const PatientPortal: React.FC = () => {
                           </span>
                           {aff.area ? (
                             <span className="text-xs text-mut">
-                              {' '}
+                              {" "}
                               ({aff.area})
                             </span>
                           ) : null}
@@ -1264,8 +1810,8 @@ export const PatientPortal: React.FC = () => {
                 },
               },
               {
-                key: 'feeRange',
-                header: 'Consultation Fee',
+                key: "feeRange",
+                header: "Consultation Fee",
                 render: (doc: any) => (
                   <span className="font-mono font-semibold text-brand-700">
                     {computeDoctorFeeRange(doc)}
@@ -1273,9 +1819,9 @@ export const PatientPortal: React.FC = () => {
                 ),
               },
               {
-                key: 'actions',
-                header: 'Actions',
-                align: 'right',
+                key: "actions",
+                header: "Actions",
+                align: "right",
                 render: (doc: any) => (
                   <div className="inline-flex items-center justify-end gap-1.5">
                     <button
@@ -1302,21 +1848,21 @@ export const PatientPortal: React.FC = () => {
       )}
 
       {/* =================================================================== */}
-      {/* 4. APPOINTMENTS                                                     */}
+      {/* 4. APPOINTMENTS (STATUS FILTERS + FEE + SERIAL + CANCEL ACTION)     */}
       {/* =================================================================== */}
-      {activeSection === 'appointments' && (
+      {activeSection === "appointments" && (
         <div className="space-y-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h1 className="text-2xl font-semibold text-ink">Appointments</h1>
               <p className="text-sm text-mut mt-0.5">
-                Track all requested, confirmed, and completed hospital
-                consultations.
+                Track all requested, confirmed, and completed hospital or
+                chamber consultations.
               </p>
             </div>
             <button
               type="button"
-              onClick={() => setActiveSection('doctors')}
+              onClick={() => setActiveSection("doctors")}
               className="btn-primary"
             >
               Request New Appointment
@@ -1324,27 +1870,77 @@ export const PatientPortal: React.FC = () => {
           </div>
 
           <DataList
-            title={`All Appointments (${appointments.length})`}
-            data={appointments}
+            title={`Appointments (${filteredAppointments.length})`}
+            data={filteredAppointments}
             getRowId={(a: any) => a.id}
-            emptyMessage="You have not requested any appointments yet."
+            emptyMessage="No appointments match your current filter."
+            toolbar={
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {(
+                    [
+                      { id: "ALL", label: `All (${appointments.length})` },
+                      {
+                        id: "UPCOMING",
+                        label: `Upcoming (${upcomingAppointmentsList.length})`,
+                      },
+                      {
+                        id: "COMPLETED",
+                        label: `Completed (${appointments.filter((a) => a.status === "COMPLETED").length})`,
+                      },
+                      {
+                        id: "CANCELLED",
+                        label: `Cancelled (${appointments.filter((a) => a.status === "CANCELLED").length})`,
+                      },
+                    ] as const
+                  ).map((tab) => (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => setAptStatusFilter(tab.id)}
+                      className={
+                        aptStatusFilter === tab.id
+                          ? "btn-primary !py-1 text-xs"
+                          : "btn-secondary !py-1 text-xs"
+                      }
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+                <input
+                  type="search"
+                  value={aptSearch}
+                  onChange={(e) => setAptSearch(e.target.value)}
+                  placeholder="Search doctor, hospital, or code..."
+                  className="rounded-md border border-line bg-paper px-3 py-1.5 text-sm text-ink min-w-[240px]"
+                />
+              </div>
+            }
             columns={[
               {
-                key: 'code',
-                header: 'Booking Code',
+                key: "code",
+                header: "Booking Code",
                 render: (apt: any) => (
-                  <span className="font-mono text-xs text-ink-2">
-                    {apt.appointmentCode}
-                  </span>
+                  <div className="space-y-0.5">
+                    <div className="font-mono text-xs text-ink-2">
+                      {apt.appointmentCode}
+                    </div>
+                    {apt.reason && (
+                      <div className="text-xs text-mut max-w-[180px] truncate">
+                        {apt.reason}
+                      </div>
+                    )}
+                  </div>
                 ),
               },
               {
-                key: 'doctor',
-                header: 'Doctor',
+                key: "doctor",
+                header: "Doctor",
                 render: (apt: any) => (
                   <div>
                     <div className="font-medium text-ink">
-                      {apt.doctor?.patientUser?.name || '—'}
+                      {apt.doctor?.patientUser?.name || "—"}
                     </div>
                     <div className="text-xs text-mut">
                       {apt.doctor?.specialty}
@@ -1353,22 +1949,24 @@ export const PatientPortal: React.FC = () => {
                 ),
               },
               {
-                key: 'hospital',
-                header: 'Hospital / Chamber',
+                key: "hospital",
+                header: "Hospital / Chamber",
                 render: (apt: any) => (
                   <div>
                     <div className="font-medium text-ink">
-                      {apt.workspace?.name || 'Independent Personal Chamber'}
+                      {apt.workspace?.name || "Independent Personal Chamber"}
                     </div>
                     <div className="text-xs text-mut">
-                      {apt.workspace?.area || apt.doctor?.area || 'Direct Chamber'}
+                      {apt.workspace?.area ||
+                        apt.doctor?.area ||
+                        "Direct Chamber"}
                     </div>
                   </div>
                 ),
               },
               {
-                key: 'schedule',
-                header: 'Date & Slot',
+                key: "schedule",
+                header: "Date & Slot",
                 render: (apt: any) => (
                   <span className="font-mono text-sm">
                     {apt.appointmentDate} · {apt.timeSlot}
@@ -1376,19 +1974,45 @@ export const PatientPortal: React.FC = () => {
                 ),
               },
               {
-                key: 'serial',
-                header: 'Serial',
+                key: "feeAndSerial",
+                header: "Fee & Serial",
                 render: (apt: any) => (
-                  <span className="font-mono text-sm">
-                    {apt.serialNumber ? `#${apt.serialNumber}` : 'Pending'}
-                  </span>
+                  <div className="font-mono text-xs space-y-0.5">
+                    <div className="font-semibold text-brand-700">
+                      {Number(apt.consultationFee || 0).toLocaleString()} Tk
+                    </div>
+                    <div className="text-mut">
+                      {apt.serialNumber
+                        ? `Serial #${apt.serialNumber}`
+                        : "Serial Pending"}
+                    </div>
+                  </div>
                 ),
               },
               {
-                key: 'status',
-                header: 'Status',
-                align: 'right',
+                key: "status",
+                header: "Status",
                 render: (apt: any) => <StatusBadge label={apt.status} />,
+              },
+              {
+                key: "actions",
+                header: "Actions",
+                align: "right",
+                render: (apt: any) =>
+                  ["PENDING", "APPROVED", "RESCHEDULED"].includes(
+                    apt.status,
+                  ) ? (
+                    <button
+                      type="button"
+                      onClick={() => handleCancelAppointment(apt.id)}
+                      className="btn-danger !px-2.5 !py-1 text-xs"
+                    >
+                      <XCircle className="w-3.5 h-3.5" />
+                      <span>Cancel</span>
+                    </button>
+                  ) : (
+                    <span className="text-xs text-mut">Closed</span>
+                  ),
               },
             ]}
           />
@@ -1398,7 +2022,7 @@ export const PatientPortal: React.FC = () => {
       {/* =================================================================== */}
       {/* 5. HOSPITALS & PACKAGES (CLEAN UNIFIED DATALISTS)                   */}
       {/* =================================================================== */}
-      {activeSection === 'hospitals' && (
+      {activeSection === "hospitals" && (
         <div className="space-y-6">
           <div>
             <h1 className="text-2xl font-semibold text-ink">
@@ -1410,36 +2034,109 @@ export const PatientPortal: React.FC = () => {
             </p>
           </div>
 
-          <section className="space-y-3">
-            <div>
-              <h2 className="text-base font-semibold text-ink">
-                Health & Diagnostic Packages (
-                {workspacesData?.featuredPackages?.length || 0})
-              </h2>
-              <p className="text-xs text-mut">
-                Published checkup packages across verified hospitals and
-                diagnostic centers.
-              </p>
-            </div>
-            {(workspacesData?.featuredPackages?.length ?? 0) === 0 ? (
-              <div className="rounded-md border border-line bg-paper p-6 text-sm text-mut text-center">
-                No active health packages match your current filters.
-              </div>
-            ) : (
-              <div className="package-card-grid">
-                {(workspacesData?.featuredPackages || []).map((pkg: any) => (
-                  <HealthPackageCard
-                    key={pkg.id}
-                    pkg={pkg}
-                    onViewHospital={(name) => {
-                      setDocWorkspaceFilter(name);
-                      setActiveSection('doctors');
-                    }}
-                  />
-                ))}
-              </div>
-            )}
-          </section>
+          <DataList
+            title={`Health & Diagnostic Packages (${workspacesData?.featuredPackages?.length || 0})`}
+            data={workspacesData?.featuredPackages || []}
+            getRowId={(pkg: any) => pkg.id}
+            emptyMessage="No active health packages match your current filters."
+            columns={[
+              {
+                key: "package",
+                header: "Package Name",
+                render: (pkg: any) => (
+                  <div>
+                    <div className="font-semibold text-ink">{pkg.title}</div>
+                    <div className="font-mono text-xs text-mut">
+                      {pkg.packageCode || "CHECKUP"} ·{" "}
+                      {pkg.durationLabel || "Same Day"}
+                    </div>
+                  </div>
+                ),
+              },
+              {
+                key: "hospital",
+                header: "Hospital / Facility",
+                render: (pkg: any) => (
+                  <div>
+                    <div className="text-sm font-medium text-ink">
+                      {pkg.workspace?.name || "Registered Facility"}
+                    </div>
+                    <div className="text-xs text-mut">
+                      {pkg.workspace?.area || "Standard Care"}
+                    </div>
+                  </div>
+                ),
+              },
+              {
+                key: "tests",
+                header: "Included Investigations",
+                render: (pkg: any) => {
+                  const tests: string[] = Array.isArray(pkg.includedTests)
+                    ? pkg.includedTests
+                    : [];
+                  return (
+                    <div className="max-w-md">
+                      <span className="inline-block rounded bg-paper-2 border border-line px-1.5 py-0.5 font-mono text-[11px] font-medium text-ink-2 mr-1.5">
+                        {tests.length || 1} Tests
+                      </span>
+                      <span className="text-xs text-mut">
+                        {tests.slice(0, 3).join(", ")}
+                        {tests.length > 3 ? ` +${tests.length - 3} more` : ""}
+                      </span>
+                    </div>
+                  );
+                },
+              },
+              {
+                key: "price",
+                header: "Package Fee",
+                render: (pkg: any) => {
+                  const price = Number(pkg.price || 0);
+                  const originalPrice = Number(pkg.originalPrice || 0);
+                  return (
+                    <div className="font-mono">
+                      <div className="text-sm font-semibold text-brand-700">
+                        {price.toLocaleString()} Tk
+                      </div>
+                      {originalPrice > price && (
+                        <div className="text-[11px] text-mut line-through">
+                          {originalPrice.toLocaleString()} Tk
+                        </div>
+                      )}
+                    </div>
+                  );
+                },
+              },
+              {
+                key: "actions",
+                header: "Actions",
+                align: "right",
+                render: (pkg: any) => (
+                  <div className="flex items-center justify-end gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setInspectedPackage(pkg)}
+                      className="btn-secondary !px-2.5 !py-1 text-xs"
+                    >
+                      Details
+                    </button>
+                    {pkg.workspace?.name && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDocWorkspaceFilter(pkg.workspace.name);
+                          setActiveSection("doctors");
+                        }}
+                        className="btn-primary !px-2.5 !py-1 text-xs"
+                      >
+                        Doctors
+                      </button>
+                    )}
+                  </div>
+                ),
+              },
+            ]}
+          />
 
           <DataList
             title={`Registered Facilities (${workspacesData?.workspaces?.length || 0})`}
@@ -1489,8 +2186,8 @@ export const PatientPortal: React.FC = () => {
             }
             columns={[
               {
-                key: 'name',
-                header: 'Facility',
+                key: "name",
+                header: "Facility",
                 render: (ws: any) => (
                   <div>
                     <div className="font-semibold text-ink">{ws.name}</div>
@@ -1501,13 +2198,13 @@ export const PatientPortal: React.FC = () => {
                 ),
               },
               {
-                key: 'type',
-                header: 'Category',
+                key: "type",
+                header: "Category",
                 render: (ws: any) => <StatusBadge label={ws.type} />,
               },
               {
-                key: 'location',
-                header: 'Area & Address',
+                key: "location",
+                header: "Area & Address",
                 render: (ws: any) => (
                   <div className="text-sm">
                     <div className="font-medium text-ink">{ws.area}</div>
@@ -1516,22 +2213,34 @@ export const PatientPortal: React.FC = () => {
                 ),
               },
               {
-                key: 'depts',
-                header: 'Departments',
+                key: "depts",
+                header: "Departments",
                 render: (ws: any) => (
                   <div className="text-xs text-ink-2 max-w-sm">
-                    {(ws.departments || []).join(', ') || 'General Care'}
+                    {(ws.departments || []).join(", ") || "General Care"}
                   </div>
                 ),
               },
               {
-                key: 'phone',
-                header: 'Contact',
-                align: 'right',
+                key: "actions",
+                header: "Contact & Doctors",
+                align: "right",
                 render: (ws: any) => (
-                  <span className="font-mono text-sm text-ink-2">
-                    {ws.phone || '—'}
-                  </span>
+                  <div className="inline-flex items-center justify-end gap-2">
+                    <span className="font-mono text-xs text-mut">
+                      {ws.phone || "—"}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDocWorkspaceFilter(ws.name);
+                        setActiveSection("doctors");
+                      }}
+                      className="btn-secondary !px-2.5 !py-1 text-xs"
+                    >
+                      Doctors ({ws.doctorAffiliations?.length || 0})
+                    </button>
+                  </div>
                 ),
               },
             ]}
@@ -1540,9 +2249,9 @@ export const PatientPortal: React.FC = () => {
       )}
 
       {/* =================================================================== */}
-      {/* 6. FAMILY (ONLY LIST OF MEMBERS + TOP-RIGHT ADD MEMBER POPUP)       */}
+      {/* 6. FAMILY (ACCOUNT SWITCHER CARDS + LIST + ADD MEMBER POPUP)        */}
       {/* =================================================================== */}
-      {activeSection === 'family' && (
+      {activeSection === "family" && (
         <div className="space-y-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
@@ -1562,6 +2271,84 @@ export const PatientPortal: React.FC = () => {
             </button>
           </div>
 
+          {/* Active Dependent Proxy Switcher Cards */}
+          {unifiedFamilyRows.some(
+            (r) => r.roleKind === "DEPENDENT" && r.status === "ACTIVE",
+          ) && (
+            <section className="space-y-2.5">
+              <h2 className="text-sm font-semibold text-ink-2">
+                Quick Proxy Account Switcher
+              </h2>
+              <div className="family-card-grid">
+                {unifiedFamilyRows
+                  .filter(
+                    (r) => r.roleKind === "DEPENDENT" && r.status === "ACTIVE",
+                  )
+                  .map((dep) => {
+                    const isCurrentlyManaging =
+                      actingPatientId === dep.personId;
+                    return (
+                      <article
+                        key={dep.id}
+                        className={`family-card ${
+                          isCurrentlyManaging
+                            ? "!border-brand-700 !bg-brand-50/50"
+                            : ""
+                        }`}
+                      >
+                        <header className="flex items-start justify-between gap-2">
+                          <div>
+                            <h3 className="text-sm font-semibold text-ink">
+                              {dep.name}
+                            </h3>
+                            <div className="font-mono text-xs text-mut">
+                              {dep.uniqueId}
+                            </div>
+                          </div>
+                          <StatusBadge label={dep.accountType} tone="brand" />
+                        </header>
+                        <div className="text-xs text-mut space-y-1">
+                          <div>
+                            Relation:{" "}
+                            <strong className="text-ink-2">
+                              {dep.relationshipLabel}
+                            </strong>
+                            {dep.bloodGroup ? ` · Blood ${dep.bloodGroup}` : ""}
+                          </div>
+                          <div className="font-mono">
+                            {dep.vaultCount ?? 0} Vault Record(s) ·{" "}
+                            {dep.appointmentCount ?? 0} Appointment(s)
+                          </div>
+                        </div>
+                        <footer className="pt-2 border-t border-line flex justify-end">
+                          {isCurrentlyManaging ? (
+                            <button
+                              type="button"
+                              onClick={() => setActingPatientId(null)}
+                              className="btn-secondary !px-2.5 !py-1 text-xs"
+                            >
+                              Switch Back to Myself
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setActingPatientId(dep.personId);
+                                setActiveSection("overview");
+                              }}
+                              className="btn-primary !px-2.5 !py-1 text-xs"
+                            >
+                              Switch to Account
+                            </button>
+                          )}
+                        </footer>
+                      </article>
+                    );
+                  })}
+              </div>
+            </section>
+          )}
+
           <DataList
             title={`Family Members (${unifiedFamilyRows.length})`}
             data={unifiedFamilyRows}
@@ -1569,8 +2356,8 @@ export const PatientPortal: React.FC = () => {
             emptyMessage="No family members linked yet. Click Add Member to link a child or senior account."
             columns={[
               {
-                key: 'member',
-                header: 'Family Member',
+                key: "member",
+                header: "Family Member",
                 render: (row: any) => (
                   <div>
                     <div className="font-semibold text-ink">{row.name}</div>
@@ -1581,48 +2368,56 @@ export const PatientPortal: React.FC = () => {
                 ),
               },
               {
-                key: 'category',
-                header: 'Account Type',
+                key: "category",
+                header: "Account Type",
                 render: (row: any) => <StatusBadge label={row.accountType} />,
               },
               {
-                key: 'relation',
-                header: 'Relationship',
+                key: "relation",
+                header: "Relationship",
                 render: (row: any) => (
-                  <span className="text-sm text-ink-2">
-                    {row.relationshipLabel}
-                  </span>
+                  <div>
+                    <div className="text-sm text-ink-2">
+                      {row.relationshipLabel}
+                    </div>
+                    {row.vaultCount !== null && (
+                      <div className="text-xs text-mut font-mono">
+                        {row.vaultCount} records · {row.appointmentCount ?? 0}{" "}
+                        appointments
+                      </div>
+                    )}
+                  </div>
                 ),
               },
               {
-                key: 'status',
-                header: 'Status',
+                key: "status",
+                header: "Status",
                 render: (row: any) => <StatusBadge label={row.status} />,
               },
               {
-                key: 'actions',
-                header: 'Actions',
-                align: 'right',
+                key: "actions",
+                header: "Actions",
+                align: "right",
                 render: (row: any) => (
                   <div className="inline-flex items-center justify-end gap-1.5">
-                    {row.roleKind === 'DEPENDENT' &&
-                      row.status === 'ACTIVE' && (
+                    {row.roleKind === "DEPENDENT" &&
+                      row.status === "ACTIVE" && (
                         <button
                           type="button"
                           onClick={() => {
                             setActingPatientId(row.personId);
-                            setActiveSection('overview');
+                            setActiveSection("overview");
                           }}
                           className="btn-primary !px-2.5 !py-1"
                         >
                           Manage Account
                         </button>
                       )}
-                    {row.status !== 'ACTIVE' ? (
+                    {row.status !== "ACTIVE" ? (
                       <button
                         type="button"
                         onClick={() =>
-                          handleToggleFamilyStatus(row.id, 'ACTIVE')
+                          handleToggleFamilyStatus(row.id, "ACTIVE")
                         }
                         className="btn-primary !px-2.5 !py-1"
                       >
@@ -1632,7 +2427,7 @@ export const PatientPortal: React.FC = () => {
                       <button
                         type="button"
                         onClick={() =>
-                          handleToggleFamilyStatus(row.id, 'REVOKED')
+                          handleToggleFamilyStatus(row.id, "REVOKED")
                         }
                         className="btn-danger !px-2.5 !py-1"
                       >
@@ -1650,7 +2445,7 @@ export const PatientPortal: React.FC = () => {
       {/* =================================================================== */}
       {/* 7. NOTIFICATIONS (DEDICATED PAGE + ACCEPT / REVOKE INVITATIONS)     */}
       {/* =================================================================== */}
-      {activeSection === 'notifications' && (
+      {activeSection === "notifications" && (
         <div className="space-y-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
@@ -1677,49 +2472,49 @@ export const PatientPortal: React.FC = () => {
             emptyMessage="No notifications or invitations in this view."
             toolbar={
               <div className="flex flex-wrap items-center gap-2">
-                {(['ALL', 'INVITATIONS', 'UNREAD'] as const).map((tab) => (
+                {(["ALL", "INVITATIONS", "UNREAD"] as const).map((tab) => (
                   <button
                     key={tab}
                     type="button"
                     onClick={() => setNotifFilter(tab)}
                     className={
-                      notifFilter === tab ? 'btn-primary' : 'btn-secondary'
+                      notifFilter === tab ? "btn-primary" : "btn-secondary"
                     }
                   >
-                    {tab === 'ALL'
-                      ? 'All'
-                      : tab === 'INVITATIONS'
-                        ? 'Invitations'
-                        : 'Unread'}
+                    {tab === "ALL"
+                      ? "All"
+                      : tab === "INVITATIONS"
+                        ? "Invitations"
+                        : "Unread"}
                   </button>
                 ))}
               </div>
             }
             columns={[
               {
-                key: 'category',
-                header: 'Type',
+                key: "category",
+                header: "Type",
                 render: (row: any) => (
                   <StatusBadge
-                    label={row.isInvitation ? 'Invitation' : row.category}
+                    label={row.isInvitation ? "Invitation" : row.category}
                     tone={
                       row.isInvitation
-                        ? 'warning'
+                        ? "warning"
                         : row.isUnread
-                          ? 'brand'
-                          : 'neutral'
+                          ? "brand"
+                          : "neutral"
                     }
                   />
                 ),
               },
               {
-                key: 'details',
-                header: 'Details',
+                key: "details",
+                header: "Details",
                 render: (row: any) => (
                   <div>
                     <div
                       className={`${
-                        row.isUnread ? 'font-semibold' : 'font-medium'
+                        row.isUnread ? "font-semibold" : "font-medium"
                       } text-ink`}
                     >
                       {row.title}
@@ -1729,8 +2524,8 @@ export const PatientPortal: React.FC = () => {
                 ),
               },
               {
-                key: 'time',
-                header: 'Received',
+                key: "time",
+                header: "Received",
                 render: (row: any) => (
                   <span className="font-mono text-xs text-mut">
                     {new Date(row.createdAt).toLocaleString()}
@@ -1738,17 +2533,17 @@ export const PatientPortal: React.FC = () => {
                 ),
               },
               {
-                key: 'actions',
-                header: 'Actions',
-                align: 'right',
+                key: "actions",
+                header: "Actions",
+                align: "right",
                 render: (row: any) => {
-                  if (row.kind === 'STAFF_INVITE') {
+                  if (row.kind === "STAFF_INVITE") {
                     return (
                       <div className="inline-flex items-center justify-end gap-1.5">
                         <button
                           type="button"
                           onClick={() =>
-                            handleRespondStaffInvite(row.memberId, 'ACCEPT')
+                            handleRespondStaffInvite(row.memberId, "ACCEPT")
                           }
                           className="btn-primary !px-2.5 !py-1"
                         >
@@ -1757,7 +2552,7 @@ export const PatientPortal: React.FC = () => {
                         <button
                           type="button"
                           onClick={() =>
-                            handleRespondStaffInvite(row.memberId, 'REVOKE')
+                            handleRespondStaffInvite(row.memberId, "REVOKE")
                           }
                           className="btn-danger !px-2.5 !py-1"
                         >
@@ -1766,13 +2561,13 @@ export const PatientPortal: React.FC = () => {
                       </div>
                     );
                   }
-                  if (row.kind === 'FAMILY_INVITE') {
+                  if (row.kind === "FAMILY_INVITE") {
                     return (
                       <div className="inline-flex items-center justify-end gap-1.5">
                         <button
                           type="button"
                           onClick={() =>
-                            handleToggleFamilyStatus(row.relId, 'ACTIVE')
+                            handleToggleFamilyStatus(row.relId, "ACTIVE")
                           }
                           className="btn-primary !px-2.5 !py-1"
                         >
@@ -1781,7 +2576,7 @@ export const PatientPortal: React.FC = () => {
                         <button
                           type="button"
                           onClick={() =>
-                            handleToggleFamilyStatus(row.relId, 'REVOKED')
+                            handleToggleFamilyStatus(row.relId, "REVOKED")
                           }
                           className="btn-danger !px-2.5 !py-1"
                         >
@@ -1810,16 +2605,29 @@ export const PatientPortal: React.FC = () => {
       )}
 
       {/* =================================================================== */}
-      {/* 8. PROFILE (PERSONAL PROFILE CONFIGURATION ONLY — CENTERED)         */}
+      {/* 8. PROFILE (PERSONAL & CLINICAL DEMOGRAPHICS — CENTERED)            */}
       {/* =================================================================== */}
-      {activeSection === 'profile' && (
+      {activeSection === "profile" && (
         <div className="mx-auto w-full max-w-3xl space-y-5">
-          <div>
-            <h1 className="text-2xl font-semibold text-ink">Profile</h1>
-            <p className="text-sm text-mut mt-0.5">
-              Update your personal demographics, contact details, and security
-              credentials.
-            </p>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h1 className="text-2xl font-semibold text-ink">Profile</h1>
+              <p className="text-sm text-mut mt-0.5">
+                Update your personal demographics, emergency triage details,
+                contact numbers, and security credentials.
+              </p>
+            </div>
+            {patient && (
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-xs rounded bg-paper border border-line px-2.5 py-1 text-ink-2">
+                  {patient.uniqueId}
+                </span>
+                <StatusBadge
+                  label={`${profileCompleteness}% Complete`}
+                  tone={profileCompleteness === 100 ? "success" : "brand"}
+                />
+              </div>
+            )}
           </div>
 
           <form
@@ -1835,14 +2643,19 @@ export const PatientPortal: React.FC = () => {
                 />
               ) : (
                 <div className="w-16 h-16 rounded-md bg-brand-700 text-white flex items-center justify-center font-semibold text-xl">
-                  {profName?.[0] || 'P'}
+                  {profName?.[0] || "P"}
                 </div>
               )}
               <div>
-                <label className="block text-sm font-medium text-ink-2 mb-1">
+                <label
+                  htmlFor="prof-avatar-upload"
+                  className="block text-sm font-medium text-ink-2 mb-1"
+                >
                   Profile Photo
                 </label>
                 <input
+                  id="prof-avatar-upload"
+                  name="profileAvatar"
                   type="file"
                   accept="image/*"
                   onChange={handleAvatarFileUpload}
@@ -1853,76 +2666,194 @@ export const PatientPortal: React.FC = () => {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-ink-2 mb-1">
-                  Full Name
+                <label
+                  htmlFor="prof-full-name"
+                  className="block text-sm font-medium text-ink-2 mb-1"
+                >
+                  Full Name <span aria-hidden="true">*</span>
                 </label>
                 <input
+                  id="prof-full-name"
+                  name="name"
                   type="text"
                   required
+                  autoComplete="name"
                   value={profName}
                   onChange={(e) => setProfName(e.target.value)}
                   className="w-full rounded-md border border-line bg-paper px-3 py-2 text-base text-ink"
                 />
+                <div className="error-msg">Please enter your full name.</div>
               </div>
               <div>
-                <label className="block text-sm font-medium text-ink-2 mb-1">
-                  Primary Phone
+                <label
+                  htmlFor="prof-phone"
+                  className="block text-sm font-medium text-ink-2 mb-1"
+                >
+                  Primary Phone <span aria-hidden="true">*</span>
                 </label>
                 <input
+                  id="prof-phone"
+                  name="phone"
                   type="tel"
                   required
+                  autoComplete="tel"
                   value={profPhone}
                   onChange={(e) => setProfPhone(e.target.value)}
+                  className="w-full rounded-md border border-line bg-paper px-3 py-2 text-base font-mono text-ink"
+                />
+                <div className="error-msg">
+                  Please provide a valid contact phone number.
+                </div>
+              </div>
+            </div>
+
+            {/* Clinical Demographics: Blood Group, Gender, Date of Birth */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div>
+                <label
+                  htmlFor="prof-blood-group"
+                  className="block text-sm font-medium text-ink-2 mb-1"
+                >
+                  Blood Group
+                </label>
+                <select
+                  id="prof-blood-group"
+                  name="bloodGroup"
+                  value={profBloodGroup}
+                  onChange={(e) => setProfBloodGroup(e.target.value)}
+                  className="w-full rounded-md border border-line bg-paper px-3 py-2 text-base text-ink"
+                >
+                  <option value="">Select Blood Group</option>
+                  <option value="A+">A+</option>
+                  <option value="A-">A-</option>
+                  <option value="B+">B+</option>
+                  <option value="B-">B-</option>
+                  <option value="AB+">AB+</option>
+                  <option value="AB-">AB-</option>
+                  <option value="O+">O+</option>
+                  <option value="O-">O-</option>
+                </select>
+              </div>
+              <div>
+                <label
+                  htmlFor="prof-gender"
+                  className="block text-sm font-medium text-ink-2 mb-1"
+                >
+                  Gender
+                </label>
+                <select
+                  id="prof-gender"
+                  name="gender"
+                  value={profGender}
+                  onChange={(e) => setProfGender(e.target.value)}
+                  className="w-full rounded-md border border-line bg-paper px-3 py-2 text-base text-ink"
+                >
+                  <option value="">Select Gender</option>
+                  <option value="Male">Male</option>
+                  <option value="Female">Female</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+              <div>
+                <label
+                  htmlFor="prof-dob"
+                  className="block text-sm font-medium text-ink-2 mb-1"
+                >
+                  Date of Birth
+                </label>
+                <input
+                  id="prof-dob"
+                  name="dateOfBirth"
+                  type="date"
+                  autoComplete="bday"
+                  value={profDob}
+                  onChange={(e) => setProfDob(e.target.value)}
                   className="w-full rounded-md border border-line bg-paper px-3 py-2 text-base font-mono text-ink"
                 />
               </div>
             </div>
 
+            {/* Emergency Contact & National ID & Password */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div>
-                <label className="block text-sm font-medium text-ink-2 mb-1">
-                  Blood Group
+                <label
+                  htmlFor="prof-emergency"
+                  className="block text-sm font-medium text-ink-2 mb-1"
+                >
+                  Emergency Contact
                 </label>
+                <span className="field-hint">
+                  Name & phone for hospital triage
+                </span>
                 <input
+                  id="prof-emergency"
+                  name="emergencyContact"
                   type="text"
-                  value={profBloodGroup}
-                  onChange={(e) => setProfBloodGroup(e.target.value)}
-                  placeholder="O+"
+                  value={profEmergencyContact}
+                  onChange={(e) => setProfEmergencyContact(e.target.value)}
+                  placeholder="Spouse / Parent +88017..."
                   className="w-full rounded-md border border-line bg-paper px-3 py-2 text-base text-ink"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-ink-2 mb-1">
+                <label
+                  htmlFor="prof-nid"
+                  className="block text-sm font-medium text-ink-2 mb-1"
+                >
                   National ID
                 </label>
+                <span className="field-hint">10 to 17 digit NID number</span>
                 <input
+                  id="prof-nid"
+                  name="nationalId"
                   type="text"
+                  inputMode="numeric"
+                  autoCorrect="off"
+                  spellCheck={false}
                   value={profNid}
                   onChange={(e) => setProfNid(e.target.value)}
                   className="w-full rounded-md border border-line bg-paper px-3 py-2 text-base font-mono text-ink"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-ink-2 mb-1">
+                <label
+                  htmlFor="prof-new-password"
+                  className="block text-sm font-medium text-ink-2 mb-1"
+                >
                   New Password (Optional)
                 </label>
+                <span className="field-hint">
+                  At least 6 characters (blank to keep)
+                </span>
                 <input
+                  id="prof-new-password"
+                  name="newPassword"
                   type="password"
+                  minLength={6}
                   autoComplete="new-password"
                   value={profNewPassword}
                   onChange={(e) => setProfNewPassword(e.target.value)}
                   placeholder="Leave blank to keep"
                   className="w-full rounded-md border border-line bg-paper px-3 py-2 text-base text-ink"
                 />
+                <div className="error-msg">
+                  Password must be at least 6 characters long.
+                </div>
               </div>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-ink-2 mb-1">
+              <label
+                htmlFor="prof-address"
+                className="block text-sm font-medium text-ink-2 mb-1"
+              >
                 Residential Address
               </label>
               <input
+                id="prof-address"
+                name="address"
                 type="text"
+                autoComplete="street-address"
                 value={profAddress}
                 onChange={(e) => setProfAddress(e.target.value)}
                 className="w-full rounded-md border border-line bg-paper px-3 py-2 text-base text-ink"
@@ -1932,12 +2863,19 @@ export const PatientPortal: React.FC = () => {
             {/* Secondary Emails & Phones */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-3 border-t border-line">
               <div className="space-y-2">
-                <label className="block text-sm font-medium text-ink-2">
+                <label
+                  htmlFor="prof-sec-email"
+                  className="block text-sm font-medium text-ink-2"
+                >
                   Additional Emails
                 </label>
                 <div className="flex gap-2">
                   <input
+                    id="prof-sec-email"
                     type="email"
+                    autoCorrect="off"
+                    autoCapitalize="none"
+                    spellCheck={false}
                     value={newSecEmail}
                     onChange={(e) => setNewSecEmail(e.target.value)}
                     placeholder="secondary@example.com"
@@ -1951,7 +2889,7 @@ export const PatientPortal: React.FC = () => {
                           ...prev,
                           newSecEmail.trim(),
                         ]);
-                        setNewSecEmail('');
+                        setNewSecEmail("");
                       }
                     }}
                     className="btn-secondary"
@@ -1970,7 +2908,7 @@ export const PatientPortal: React.FC = () => {
                       aria-label={`Remove ${em}`}
                       onClick={() =>
                         setSecondaryEmails((prev) =>
-                          prev.filter((_, i) => i !== idx)
+                          prev.filter((_, i) => i !== idx),
                         )
                       }
                       className="text-accent-600"
@@ -1982,11 +2920,15 @@ export const PatientPortal: React.FC = () => {
               </div>
 
               <div className="space-y-2">
-                <label className="block text-sm font-medium text-ink-2">
+                <label
+                  htmlFor="prof-sec-phone"
+                  className="block text-sm font-medium text-ink-2"
+                >
                   Additional Phone Numbers
                 </label>
                 <div className="flex gap-2">
                   <input
+                    id="prof-sec-phone"
                     type="tel"
                     value={newSecPhone}
                     onChange={(e) => setNewSecPhone(e.target.value)}
@@ -2001,7 +2943,7 @@ export const PatientPortal: React.FC = () => {
                           ...prev,
                           newSecPhone.trim(),
                         ]);
-                        setNewSecPhone('');
+                        setNewSecPhone("");
                       }
                     }}
                     className="btn-secondary"
@@ -2020,7 +2962,7 @@ export const PatientPortal: React.FC = () => {
                       aria-label={`Remove ${ph}`}
                       onClick={() =>
                         setSecondaryPhones((prev) =>
-                          prev.filter((_, i) => i !== idx)
+                          prev.filter((_, i) => i !== idx),
                         )
                       }
                       className="text-accent-600"
@@ -2052,6 +2994,280 @@ export const PatientPortal: React.FC = () => {
         fallbackPatient={patient}
       />
 
+      {/* 1b. Health Package Details Modal */}
+      <ModalDialog
+        open={Boolean(inspectedPackage)}
+        onClose={() => setInspectedPackage(null)}
+        title={inspectedPackage?.title || "Health Package Details"}
+        subtitle={
+          inspectedPackage?.workspace?.name
+            ? `${inspectedPackage.workspace.name} (${inspectedPackage.workspace.area || "Facility"})`
+            : undefined
+        }
+      >
+        {inspectedPackage && (
+          <div className="space-y-4 text-sm">
+            {inspectedPackage.tagline && (
+              <div className="rounded-md bg-brand-50 border border-brand-200 px-3 py-2 text-xs font-medium text-brand-800">
+                {inspectedPackage.tagline}
+              </div>
+            )}
+            <p className="text-ink-2">{inspectedPackage.description}</p>
+            <div>
+              <div className="text-xs font-semibold text-mut mb-1.5">
+                Included Diagnostic Tests (
+                {inspectedPackage.includedTests?.length || 0})
+              </div>
+              <ul className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                {(inspectedPackage.includedTests || []).map(
+                  (t: string, idx: number) => (
+                    <li
+                      key={idx}
+                      className="rounded border border-line bg-paper-2 px-2.5 py-1 text-xs text-ink"
+                    >
+                      • {t}
+                    </li>
+                  ),
+                )}
+              </ul>
+            </div>
+            <div className="rounded-md border border-line bg-paper-2 p-3 flex items-center justify-between">
+              <div>
+                <div className="text-xs text-mut">Package Price</div>
+                <div className="font-mono text-lg font-semibold text-brand-700">
+                  {Number(inspectedPackage.price || 0).toLocaleString()} Tk
+                </div>
+              </div>
+              <div className="text-right text-xs text-mut">
+                <div>
+                  {inspectedPackage.durationLabel || "Standard Delivery"}
+                </div>
+                {inspectedPackage.workspace?.phone && (
+                  <div className="font-mono text-ink-2 mt-0.5">
+                    Contact: {inspectedPackage.workspace.phone}
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setInspectedPackage(null)}
+                className="btn-secondary"
+              >
+                Close
+              </button>
+              {inspectedPackage.workspace?.name && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const name = inspectedPackage.workspace.name;
+                    setInspectedPackage(null);
+                    setDocWorkspaceFilter(name);
+                    setActiveSection("doctors");
+                  }}
+                  className="btn-primary"
+                >
+                  View Facility Doctors
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+      </ModalDialog>
+
+      {/* 1c. Self-Upload Historical / External Record Modal */}
+      <ModalDialog
+        open={uploadModalOpen}
+        onClose={() => setUploadModalOpen(false)}
+        title="Add External Medical Record"
+        subtitle="Log a historical prescription, external diagnostic report, or billing receipt into your clinical Vault."
+      >
+        <form onSubmit={handleSelfUploadRecord} className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label
+                htmlFor="upload-type"
+                className="block text-sm font-medium text-ink-2 mb-1"
+              >
+                Record Category
+              </label>
+              <select
+                id="upload-type"
+                value={uploadType}
+                onChange={(e) =>
+                  setUploadType(
+                    e.target.value as
+                      | "PRESCRIPTION"
+                      | "LAB_REPORT"
+                      | "BILLING_DOC",
+                  )
+                }
+                className="w-full rounded-md border border-line bg-paper px-3 py-2 text-base text-ink"
+              >
+                <option value="PRESCRIPTION">Prescription</option>
+                <option value="LAB_REPORT">Laboratory Report</option>
+                <option value="BILLING_DOC">Billing Invoice</option>
+              </select>
+            </div>
+            <div>
+              <label
+                htmlFor="upload-title"
+                className="block text-sm font-medium text-ink-2 mb-1"
+              >
+                Document Title <span aria-hidden="true">*</span>
+              </label>
+              <input
+                id="upload-title"
+                type="text"
+                required
+                value={uploadTitle}
+                onChange={(e) => setUploadTitle(e.target.value)}
+                placeholder="e.g. Cardiology Follow-up or Lipid Panel"
+                className="w-full rounded-md border border-line bg-paper px-3 py-2 text-base text-ink"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label
+                htmlFor="upload-doc-name"
+                className="block text-sm font-medium text-ink-2 mb-1"
+              >
+                Clinician / Doctor Name
+              </label>
+              <input
+                id="upload-doc-name"
+                type="text"
+                value={uploadDoctorName}
+                onChange={(e) => setUploadDoctorName(e.target.value)}
+                placeholder="e.g. Dr. Mahmudul Hasan"
+                className="w-full rounded-md border border-line bg-paper px-3 py-2 text-base text-ink"
+              />
+            </div>
+            <div>
+              <label
+                htmlFor="upload-ws-name"
+                className="block text-sm font-medium text-ink-2 mb-1"
+              >
+                Hospital / Diagnostic Center
+              </label>
+              <input
+                id="upload-ws-name"
+                type="text"
+                value={uploadWorkspaceName}
+                onChange={(e) => setUploadWorkspaceName(e.target.value)}
+                placeholder="e.g. Popular Diagnostic Centre"
+                className="w-full rounded-md border border-line bg-paper px-3 py-2 text-base text-ink"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label
+              htmlFor="upload-summary"
+              className="block text-sm font-medium text-ink-2 mb-1"
+            >
+              Clinical Summary / Diagnosis / Findings
+            </label>
+            <input
+              id="upload-summary"
+              type="text"
+              value={uploadSummary}
+              onChange={(e) => setUploadSummary(e.target.value)}
+              placeholder="Key diagnosis, findings, or invoice summary..."
+              className="w-full rounded-md border border-line bg-paper px-3 py-2 text-base text-ink"
+            />
+          </div>
+
+          {uploadType === "PRESCRIPTION" && (
+            <div className="rounded-md border border-line bg-paper-2 p-3 space-y-2">
+              <div className="text-xs font-semibold text-ink-2">
+                Primary Medication (Optional)
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <input
+                  type="text"
+                  value={uploadMedName}
+                  onChange={(e) => setUploadMedName(e.target.value)}
+                  placeholder="Tab. Napa 500mg"
+                  aria-label="Medication name"
+                  className="rounded-md border border-line bg-paper px-2.5 py-1.5 text-sm text-ink"
+                />
+                <input
+                  type="text"
+                  value={uploadMedDosage}
+                  onChange={(e) => setUploadMedDosage(e.target.value)}
+                  placeholder="1 + 0 + 1"
+                  aria-label="Dosage"
+                  className="rounded-md border border-line bg-paper px-2.5 py-1.5 text-sm font-mono text-ink"
+                />
+                <input
+                  type="text"
+                  value={uploadMedDuration}
+                  onChange={(e) => setUploadMedDuration(e.target.value)}
+                  placeholder="7 Days"
+                  aria-label="Duration"
+                  className="rounded-md border border-line bg-paper px-2.5 py-1.5 text-sm text-ink"
+                />
+              </div>
+            </div>
+          )}
+
+          {uploadType === "LAB_REPORT" && (
+            <div className="rounded-md border border-line bg-paper-2 p-3 space-y-2">
+              <div className="text-xs font-semibold text-ink-2">
+                Key Test Parameter (Optional)
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <input
+                  type="text"
+                  value={uploadLabParam}
+                  onChange={(e) => setUploadLabParam(e.target.value)}
+                  placeholder="HbA1c / Creatinine"
+                  aria-label="Parameter name"
+                  className="rounded-md border border-line bg-paper px-2.5 py-1.5 text-sm text-ink"
+                />
+                <input
+                  type="text"
+                  value={uploadLabResult}
+                  onChange={(e) => setUploadLabResult(e.target.value)}
+                  placeholder="5.6 %"
+                  aria-label="Result value"
+                  className="rounded-md border border-line bg-paper px-2.5 py-1.5 text-sm font-mono text-ink"
+                />
+                <input
+                  type="text"
+                  value={uploadLabRef}
+                  onChange={(e) => setUploadLabRef(e.target.value)}
+                  placeholder="< 5.7 %"
+                  aria-label="Reference range"
+                  className="rounded-md border border-line bg-paper px-2.5 py-1.5 text-sm font-mono text-ink"
+                />
+              </div>
+            </div>
+          )}
+
+          <div className="pt-2 flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setUploadModalOpen(false)}
+              className="btn-secondary"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={uploadSubmitting}
+              className="btn-primary"
+            >
+              {uploadSubmitting ? "Saving..." : "Save to Vault"}
+            </button>
+          </div>
+        </form>
+      </ModalDialog>
+
       {/* 2. Generated QR Code & Pairing Code Popup */}
       <ModalDialog
         open={Boolean(qrPopupData)}
@@ -2070,17 +3286,48 @@ export const PatientPortal: React.FC = () => {
               />
             </div>
 
-            <div className="rounded-md border border-line bg-paper-2 p-3.5 space-y-1">
-              <div className="text-xs text-mut">Pairing Code</div>
-              <div className="font-mono text-2xl font-semibold tracking-wider text-brand-800">
-                {qrPopupData.session.shortCode}
+            <div className="rounded-md border border-line bg-paper-2 p-3.5 space-y-1.5">
+              <div className="text-xs text-mut">6-Character Pairing Code</div>
+              <div className="flex items-center justify-center gap-2">
+                <span className="font-mono text-2xl font-semibold tracking-wider text-brand-800">
+                  {qrPopupData.session.shortCode}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => handleCopyCode(qrPopupData.session.shortCode)}
+                  className="btn-secondary !px-2 !py-1 text-xs"
+                  title="Copy pairing code"
+                >
+                  {copiedCode === qrPopupData.session.shortCode ? (
+                    <Check className="w-3.5 h-3.5 text-brand-700" />
+                  ) : (
+                    <Copy className="w-3.5 h-3.5" />
+                  )}
+                  <span>
+                    {copiedCode === qrPopupData.session.shortCode
+                      ? "Copied"
+                      : "Copy"}
+                  </span>
+                </button>
               </div>
-              <div className="text-xs text-mut pt-1">
-                Expires at{' '}
-                {new Date(qrPopupData.session.expiresAt).toLocaleTimeString(
-                  [],
-                  { hour: '2-digit', minute: '2-digit' }
-                )}
+              <div className="flex items-center justify-center gap-2 text-xs text-mut pt-1">
+                <Clock className="w-3.5 h-3.5 text-brand-700" />
+                <span>
+                  {formatRemainingTime(qrPopupData.session.expiresAt, nowTick)}{" "}
+                  (until{" "}
+                  {new Date(qrPopupData.session.expiresAt).toLocaleTimeString(
+                    [],
+                    { hour: "2-digit", minute: "2-digit" },
+                  )}
+                  )
+                </span>
+              </div>
+              <div className="text-xs text-ink-2">
+                Sharing{" "}
+                <strong>
+                  {qrPopupData.session.documentIds?.length || 0} record(s)
+                </strong>{" "}
+                + enabling immutable prescription issuance
               </div>
             </div>
 
@@ -2118,45 +3365,68 @@ export const PatientPortal: React.FC = () => {
           emptyMessage="No QR codes generated yet."
           columns={[
             {
-              key: 'code',
-              header: 'Pairing Code',
+              key: "code",
+              header: "Pairing Code",
               render: (s: any) => (
-                <span className="font-mono font-semibold text-ink">
-                  {s.shortCode}
-                </span>
+                <div className="space-y-0.5">
+                  <div className="font-mono font-semibold text-ink">
+                    {s.shortCode}
+                  </div>
+                  <div className="text-xs text-mut font-mono">
+                    {s.documentIds?.length ?? 0} doc(s) shared
+                  </div>
+                </div>
               ),
             },
             {
-              key: 'doctor',
-              header: 'Scanned By',
+              key: "doctor",
+              header: "Scanned By",
               render: (s: any) => (
-                <span>
-                  {s.scannedByDoctor?.patientUser?.name || 'Not scanned yet'}
-                </span>
+                <div>
+                  <div>
+                    {s.scannedByDoctor?.patientUser?.name || "Not scanned yet"}
+                  </div>
+                  {s.workspace?.name && (
+                    <div className="text-xs text-mut">{s.workspace.name}</div>
+                  )}
+                </div>
               ),
             },
             {
-              key: 'expires',
-              header: 'Expires',
-              render: (s: any) => (
-                <span className="font-mono text-xs text-mut">
-                  {new Date(s.expiresAt).toLocaleString()}
-                </span>
-              ),
+              key: "expires",
+              header: "Expiry / Countdown",
+              render: (s: any) => {
+                const isActive =
+                  ["GENERATED", "SCANNED_ACTIVE"].includes(s.status) &&
+                  new Date(s.expiresAt).getTime() > nowTick;
+                return (
+                  <div className="font-mono text-xs">
+                    {isActive ? (
+                      <span className="text-brand-700 font-semibold">
+                        {formatRemainingTime(s.expiresAt, nowTick)}
+                      </span>
+                    ) : (
+                      <span className="text-mut">
+                        {new Date(s.expiresAt).toLocaleString()}
+                      </span>
+                    )}
+                  </div>
+                );
+              },
             },
             {
-              key: 'status',
-              header: 'Status',
+              key: "status",
+              header: "Status",
               render: (s: any) => <StatusBadge label={s.status} />,
             },
             {
-              key: 'action',
-              header: 'Action',
-              align: 'right',
+              key: "action",
+              header: "Action",
+              align: "right",
               render: (s: any) => {
                 const isActive =
-                  ['GENERATED', 'SCANNED_ACTIVE'].includes(s.status) &&
-                  new Date(s.expiresAt) > new Date();
+                  ["GENERATED", "SCANNED_ACTIVE"].includes(s.status) &&
+                  new Date(s.expiresAt).getTime() > nowTick;
                 return isActive ? (
                   <button
                     type="button"
@@ -2174,11 +3444,11 @@ export const PatientPortal: React.FC = () => {
         />
       </ModalDialog>
 
-      {/* 4. Doctor Details Modal (Shows Fee Range & Available Locations without per-hospital fee breakdown) */}
+      {/* 4. Doctor Details Modal */}
       <ModalDialog
         open={Boolean(inspectedDoctor)}
         onClose={() => setInspectedDoctor(null)}
-        title={inspectedDoctor?.name || 'Doctor Details'}
+        title={inspectedDoctor?.name || "Doctor Details"}
         subtitle={
           inspectedDoctor
             ? `${inspectedDoctor.specialty} · Consultation Fee: ${computeDoctorFeeRange(inspectedDoctor)}`
@@ -2187,11 +3457,17 @@ export const PatientPortal: React.FC = () => {
       >
         {inspectedDoctor && (
           <div className="space-y-4 text-sm">
+            {inspectedDoctor.customHeadline && (
+              <div className="rounded-md bg-brand-50 border border-brand-200 px-3 py-2 text-xs font-medium text-brand-800">
+                {inspectedDoctor.customHeadline}
+              </div>
+            )}
+
             {inspectedDoctor.degrees?.length > 0 && (
               <div>
                 <div className="text-xs text-mut">Qualifications</div>
                 <div className="font-medium text-ink mt-0.5">
-                  {inspectedDoctor.degrees.join(', ')}
+                  {inspectedDoctor.degrees.join(", ")}
                 </div>
               </div>
             )}
@@ -2225,16 +3501,20 @@ export const PatientPortal: React.FC = () => {
                   {inspectedDoctor.affiliations.map((aff: any) => (
                     <div
                       key={aff.affiliationId}
-                      className="rounded-md border border-line bg-paper-2 p-2.5"
+                      className="rounded-md border border-line bg-paper-2 p-2.5 flex items-center justify-between gap-2"
                     >
-                      <div className="font-medium text-ink">
-                        {aff.workspaceName}{' '}
-                        {aff.area ? `(${aff.area})` : ''}
+                      <div>
+                        <div className="font-medium text-ink">
+                          {aff.workspaceName} {aff.area ? `(${aff.area})` : ""}
+                        </div>
+                        <div className="text-xs text-mut mt-0.5">
+                          {aff.schedule}
+                          {aff.roomNumber ? ` · ${aff.roomNumber}` : ""}
+                        </div>
                       </div>
-                      <div className="text-xs text-mut mt-0.5">
-                        {aff.schedule}
-                        {aff.roomNumber ? ` · ${aff.roomNumber}` : ''}
-                      </div>
+                      <span className="font-mono text-xs font-semibold text-brand-700 shrink-0">
+                        {Number(aff.consultationFee || 0).toLocaleString()} Tk
+                      </span>
                     </div>
                   ))}
                 </div>
@@ -2265,7 +3545,7 @@ export const PatientPortal: React.FC = () => {
         )}
       </ModalDialog>
 
-      {/* 5. Request Appointment Modal (Shows exact hospital fee & schedule + Independent Chamber option) */}
+      {/* 5. Request Appointment Modal */}
       <ModalDialog
         open={Boolean(bookingDoctor)}
         onClose={() => {
@@ -2291,10 +3571,14 @@ export const PatientPortal: React.FC = () => {
             )}
 
             <div>
-              <label className="block text-sm font-medium text-ink-2 mb-1">
+              <label
+                htmlFor="booking-workspace"
+                className="block text-sm font-medium text-ink-2 mb-1"
+              >
                 Select Hospital / Chamber
               </label>
               <select
+                id="booking-workspace"
                 required
                 value={bookingWorkspaceId}
                 onChange={(e) => setBookingWorkspaceId(e.target.value)}
@@ -2302,28 +3586,72 @@ export const PatientPortal: React.FC = () => {
               >
                 {(bookingDoctor.affiliations || []).map((aff: any) => (
                   <option key={aff.workspaceId} value={aff.workspaceId}>
-                    {aff.workspaceName} ({aff.area || 'Facility'}) —{' '}
-                    {Number(aff.consultationFee || 0).toLocaleString()} Tk ·{' '}
-                    {aff.schedule || 'Standard Hours'}
+                    {aff.workspaceName} ({aff.area || "Facility"}) —{" "}
+                    {Number(aff.consultationFee || 0).toLocaleString()} Tk ·{" "}
+                    {aff.schedule || "Standard Hours"}
                   </option>
                 ))}
                 <option value="INDEPENDENT_CHAMBER">
                   Independent Personal Chamber (
-                  {bookingDoctor.area || 'Direct Consultation'}) —{' '}
+                  {bookingDoctor.area || "Direct Consultation"}) —{" "}
                   {Number(
-                    bookingDoctor.defaultConsultationFee || 1000
-                  ).toLocaleString()}{' '}
+                    bookingDoctor.defaultConsultationFee || 1000,
+                  ).toLocaleString()}{" "}
                   Tk
                 </option>
               </select>
             </div>
 
+            {selectedBookingChamber && (
+              <div className="rounded-md border border-line bg-paper-2 p-3 space-y-2 text-xs">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="font-semibold text-ink">
+                      {selectedBookingChamber.name} (
+                      {selectedBookingChamber.area})
+                    </div>
+                    <div className="text-mut mt-0.5">
+                      Schedule: {selectedBookingChamber.schedule}
+                      {selectedBookingChamber.roomNumber
+                        ? ` · ${selectedBookingChamber.roomNumber}`
+                        : ""}
+                    </div>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <div className="text-mut">Consultation Fee</div>
+                    <div className="font-mono text-sm font-semibold text-brand-700">
+                      {selectedBookingChamber.fee.toLocaleString()} Tk
+                    </div>
+                  </div>
+                </div>
+                <div className="pt-1.5 border-t border-line flex flex-wrap items-center gap-1.5">
+                  <span className="text-mut font-medium">
+                    Configured Slots:
+                  </span>
+                  {(selectedBookingChamber.availableSlots || []).map(
+                    (slot: string) => (
+                      <span
+                        key={slot}
+                        className="inline-flex items-center rounded bg-paper border border-line px-1.5 py-0.5 font-mono text-[11px] text-brand-700"
+                      >
+                        {slot}
+                      </span>
+                    ),
+                  )}
+                </div>
+              </div>
+            )}
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="block text-sm font-medium text-ink-2 mb-1">
+                <label
+                  htmlFor="booking-date"
+                  className="block text-sm font-medium text-ink-2 mb-1"
+                >
                   Preferred Date
                 </label>
                 <input
+                  id="booking-date"
                   type="date"
                   required
                   value={bookingDate}
@@ -2332,27 +3660,48 @@ export const PatientPortal: React.FC = () => {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-ink-2 mb-1">
-                  Preferred Time Slot
+                <label
+                  htmlFor="booking-slot"
+                  className="block text-sm font-medium text-ink-2 mb-1"
+                >
+                  Available Time Slot (Configured by Chamber)
                 </label>
                 <select
+                  id="booking-slot"
+                  required
                   value={bookingSlot}
                   onChange={(e) => setBookingSlot(e.target.value)}
-                  className="w-full rounded-md border border-line bg-paper px-3 py-2 text-base text-ink"
+                  className="w-full rounded-md border border-line bg-paper px-3 py-2 text-base font-mono text-ink"
                 >
-                  <option value="05:00 PM">05:00 PM</option>
-                  <option value="06:00 PM">06:00 PM</option>
-                  <option value="07:00 PM">07:00 PM</option>
-                  <option value="08:00 PM">08:00 PM</option>
+                  {(
+                    selectedBookingChamber?.availableSlots || [
+                      "05:00 PM",
+                      "06:00 PM",
+                      "07:00 PM",
+                      "08:00 PM",
+                    ]
+                  ).map((slot: string) => (
+                    <option key={slot} value={slot}>
+                      {slot}
+                    </option>
+                  ))}
                 </select>
+                <p className="text-[11px] text-mut mt-1">
+                  Only time slots configured by the Doctor or Hospital are
+                  available.
+                </p>
               </div>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-ink-2 mb-1">
+              <label
+                htmlFor="booking-reason"
+                className="block text-sm font-medium text-ink-2 mb-1"
+              >
                 Reason for Consultation
               </label>
               <input
+                id="booking-reason"
                 type="text"
                 value={bookingReason}
                 onChange={(e) => setBookingReason(e.target.value)}
@@ -2377,7 +3726,7 @@ export const PatientPortal: React.FC = () => {
                 disabled={bookingSubmitting}
                 className="btn-primary"
               >
-                {bookingSubmitting ? 'Submitting...' : 'Submit Request'}
+                {bookingSubmitting ? "Submitting..." : "Submit Request"}
               </button>
             </div>
           </form>
@@ -2393,10 +3742,14 @@ export const PatientPortal: React.FC = () => {
       >
         <form onSubmit={handleSendFamilyInvite} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-ink-2 mb-1">
+            <label
+              htmlFor="fam-direction"
+              className="block text-sm font-medium text-ink-2 mb-1"
+            >
               Link Role
             </label>
             <select
+              id="fam-direction"
               value={famDirection}
               onChange={(e) => setFamDirection(e.target.value)}
               className="w-full rounded-md border border-line bg-paper px-3 py-2 text-base text-ink"
@@ -2411,12 +3764,19 @@ export const PatientPortal: React.FC = () => {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-ink-2 mb-1">
+            <label
+              htmlFor="fam-target-id"
+              className="block text-sm font-medium text-ink-2 mb-1"
+            >
               Member Patient ID, Email, or Phone
             </label>
             <input
+              id="fam-target-id"
               type="text"
               required
+              autoCorrect="off"
+              autoCapitalize="none"
+              spellCheck={false}
               value={famTargetId}
               onChange={(e) => setFamTargetId(e.target.value)}
               placeholder="PAT-2026-100002 or child@demo.bd"
@@ -2426,10 +3786,14 @@ export const PatientPortal: React.FC = () => {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="block text-sm font-medium text-ink-2 mb-1">
+              <label
+                htmlFor="fam-type"
+                className="block text-sm font-medium text-ink-2 mb-1"
+              >
                 Account Category
               </label>
               <select
+                id="fam-type"
                 value={famType}
                 onChange={(e) => setFamType(e.target.value)}
                 className="w-full rounded-md border border-line bg-paper px-3 py-2 text-base text-ink"
@@ -2439,10 +3803,14 @@ export const PatientPortal: React.FC = () => {
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-ink-2 mb-1">
+              <label
+                htmlFor="fam-label"
+                className="block text-sm font-medium text-ink-2 mb-1"
+              >
                 Relationship Label
               </label>
               <input
+                id="fam-label"
                 type="text"
                 value={famLabel}
                 onChange={(e) => setFamLabel(e.target.value)}

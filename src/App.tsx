@@ -6,8 +6,10 @@ import { CentralRegistryPortal } from './portals/CentralRegistryPortal';
 import { PatientPortal } from './portals/PatientPortal';
 import { DoctorPortal } from './portals/DoctorPortal';
 import { WorkspacePortal } from './portals/WorkspacePortal';
+import { useSmoothWheelScroll } from './hooks/useSmoothWheelScroll';
 
 const AppShell: React.FC = () => {
+  useSmoothWheelScroll();
   const { user, loading, activePersona } = useAuth();
 
   if (loading) {

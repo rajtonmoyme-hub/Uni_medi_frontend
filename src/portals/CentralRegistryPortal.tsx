@@ -1,16 +1,19 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   ArrowLeft,
+  Building2,
   CheckCheck,
   Download,
   Eye,
-  ExternalLink,
+  Package,
+  ShieldCheck,
 } from 'lucide-react';
 import { apiRequest } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { DataList } from '../components/DataList';
 import { DocumentViewerModal } from '../components/DocumentViewerModal';
 import { StatusBadge } from '../components/StatusBadge';
+import { TransientToast } from '../components/TransientToast';
 import {
   downloadClinicalDocumentPdf,
   downloadRegistryReportPdf,
@@ -24,8 +27,115 @@ interface DetailViewState {
   returnSection: string;
 }
 
+const RegistryPackageCardGrid: React.FC<{
+  packages: any[];
+  onOpenWorkspace?: (workspaceId: string) => void;
+  emptyMessage?: string;
+}> = ({
+  packages,
+  onOpenWorkspace,
+  emptyMessage = 'No health packages offered by this workspace yet.',
+}) => {
+  if (!packages || packages.length === 0) {
+    return (
+      <div className="rounded-md border border-line bg-paper px-4 py-6 text-center text-sm text-mut">
+        {emptyMessage}
+      </div>
+    );
+  }
+
+  return (
+    <div className="package-card-grid">
+      {packages.map((pkg: any) => {
+        const price = Number(pkg.price || 0);
+        const origPrice = pkg.originalPrice ? Number(pkg.originalPrice) : null;
+        return (
+          <article key={pkg.id} className="package-card">
+            <div className="space-y-1.5">
+              <div className="flex items-start justify-between gap-2">
+                <h3 className="text-base font-semibold text-ink leading-snug">
+                  {pkg.title}
+                </h3>
+                <StatusBadge label={pkg.isActive ? 'ACTIVE' : 'PAUSED'} />
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5 text-xs text-mut">
+                {pkg.packageCode && (
+                  <span className="font-mono text-ink-2">{pkg.packageCode}</span>
+                )}
+                {pkg.workspace && (
+                  <>
+                    <span>·</span>
+                    {onOpenWorkspace && pkg.workspace.id ? (
+                      <button
+                        type="button"
+                        onClick={() => onOpenWorkspace(pkg.workspace.id)}
+                        className="inline-flex items-center gap-1 font-semibold text-brand-800 hover:text-brand-900 underline underline-offset-2 text-left"
+                      >
+                        <Building2 className="w-3 h-3 shrink-0" />
+                        <span>{pkg.workspace.name}</span>
+                      </button>
+                    ) : (
+                      <span className="font-medium text-ink-2">
+                        {pkg.workspace.name}
+                      </span>
+                    )}
+                    {pkg.workspace.area && <span>({pkg.workspace.area})</span>}
+                  </>
+                )}
+              </div>
+            </div>
+
+            <div className="space-y-2.5">
+              {(pkg.tagline || pkg.description) && (
+                <p className="text-xs text-mut leading-relaxed">
+                  {pkg.tagline || pkg.description}
+                </p>
+              )}
+              {Array.isArray(pkg.includedTests) &&
+                pkg.includedTests.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {pkg.includedTests.map((testName: string, i: number) => (
+                      <span
+                        key={i}
+                        className="inline-flex items-center rounded bg-paper-2 border border-line px-2 py-0.5 text-xs text-ink-2"
+                      >
+                        {testName}
+                      </span>
+                    ))}
+                  </div>
+                )}
+            </div>
+
+            <div className="pt-2.5 border-t border-line flex items-end justify-between gap-2">
+              <div className="text-xs text-mut">
+                {pkg.durationLabel || 'Comprehensive Package'}
+              </div>
+              <div className="text-right">
+                {origPrice && origPrice > price && (
+                  <div className="text-xs font-mono text-mut line-through">
+                    {origPrice.toLocaleString()} Tk
+                  </div>
+                )}
+                <div className="text-base font-semibold font-mono text-brand-700">
+                  {price.toLocaleString()} Tk
+                </div>
+              </div>
+            </div>
+          </article>
+        );
+      })}
+    </div>
+  );
+};
+
 export const CentralRegistryPortal: React.FC = () => {
-  const { activeSection, setActiveSection, refreshUnreadCount } = useAuth();
+  const {
+    user,
+    activeSection,
+    sectionNavTick,
+    setActiveSection,
+    refreshUnreadCount,
+  } = useAuth();
 
   const [overview, setOverview] = useState<any>(null);
   const [patients, setPatients] = useState<any[]>([]);
@@ -62,14 +172,19 @@ export const CentralRegistryPortal: React.FC = () => {
     null
   );
 
-  // Clear detailView whenever user switches sidebar navigation tabs
-  const prevSectionRef = useRef<string>(activeSection);
+  // Clear detailView whenever user clicks any sidebar/navbar section tab
+  const suppressNextNavResetRef = useRef<boolean>(false);
+  const prevNavTickRef = useRef<number>(sectionNavTick);
   useEffect(() => {
-    if (prevSectionRef.current !== activeSection) {
-      prevSectionRef.current = activeSection;
+    if (prevNavTickRef.current !== sectionNavTick) {
+      prevNavTickRef.current = sectionNavTick;
+      if (suppressNextNavResetRef.current) {
+        suppressNextNavResetRef.current = false;
+        return;
+      }
       setDetailView(null);
     }
-  }, [activeSection]);
+  }, [sectionNavTick]);
 
   const loadOverview = useCallback(async () => {
     try {
@@ -149,22 +264,28 @@ export const CentralRegistryPortal: React.FC = () => {
     loadNotifications,
   ]);
 
-  // Full-Page Navigation Openers
+  // Full-Page Navigation Openers (redirects to corresponding directory section + details page)
   const openPatientPage = async (
     patientId: string,
     returnTo?: string
   ): Promise<void> => {
+    const originSection =
+      returnTo || detailView?.returnSection || activeSection;
     setLoadingDetail(true);
     try {
       const res = await apiRequest(
         `/central-registry/patients/${patientId}/inspect`
       );
-      setDetailView((prev) => ({
+      setDetailView({
         kind: 'PATIENT',
         data: res,
-        returnSection: returnTo || prev?.returnSection || activeSection,
-      }));
-      window.scrollTo({ top: 0 });
+        returnSection: originSection,
+      });
+      if (activeSection !== 'patients') {
+        suppressNextNavResetRef.current = true;
+        setActiveSection('patients');
+      }
+      window.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior });
     } catch (err: any) {
       setFeedback({ type: 'error', text: err.message });
     } finally {
@@ -176,17 +297,23 @@ export const CentralRegistryPortal: React.FC = () => {
     doctorId: string,
     returnTo?: string
   ): Promise<void> => {
+    const originSection =
+      returnTo || detailView?.returnSection || activeSection;
     setLoadingDetail(true);
     try {
       const res = await apiRequest(
         `/central-registry/doctors/${doctorId}/inspect`
       );
-      setDetailView((prev) => ({
+      setDetailView({
         kind: 'DOCTOR',
         data: res,
-        returnSection: returnTo || prev?.returnSection || activeSection,
-      }));
-      window.scrollTo({ top: 0 });
+        returnSection: originSection,
+      });
+      if (activeSection !== 'doctors') {
+        suppressNextNavResetRef.current = true;
+        setActiveSection('doctors');
+      }
+      window.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior });
     } catch (err: any) {
       setFeedback({ type: 'error', text: err.message });
     } finally {
@@ -198,17 +325,23 @@ export const CentralRegistryPortal: React.FC = () => {
     workspaceId: string,
     returnTo?: string
   ): Promise<void> => {
+    const originSection =
+      returnTo || detailView?.returnSection || activeSection;
     setLoadingDetail(true);
     try {
       const res = await apiRequest(
         `/central-registry/workspaces/${workspaceId}/inspect`
       );
-      setDetailView((prev) => ({
+      setDetailView({
         kind: 'WORKSPACE',
         data: res,
-        returnSection: returnTo || prev?.returnSection || activeSection,
-      }));
-      window.scrollTo({ top: 0 });
+        returnSection: originSection,
+      });
+      if (activeSection !== 'hospitals') {
+        suppressNextNavResetRef.current = true;
+        setActiveSection('hospitals');
+      }
+      window.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior });
     } catch (err: any) {
       setFeedback({ type: 'error', text: err.message });
     } finally {
@@ -220,9 +353,10 @@ export const CentralRegistryPortal: React.FC = () => {
     const target = detailView?.returnSection || activeSection;
     setDetailView(null);
     if (target !== activeSection) {
-      prevSectionRef.current = target;
+      suppressNextNavResetRef.current = true;
       setActiveSection(target);
     }
+    window.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior });
   };
 
   // Governance Status Mutations
@@ -622,25 +756,10 @@ export const CentralRegistryPortal: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      {feedback && (
-        <div
-          role="status"
-          className={`rounded-md border px-4 py-3 text-sm font-medium flex items-center justify-between gap-3 ${
-            feedback.type === 'success'
-              ? 'bg-brand-50 border-brand-200 text-brand-800'
-              : 'bg-accent-50 border-accent-100 text-accent-600'
-          }`}
-        >
-          <span>{feedback.text}</span>
-          <button
-            type="button"
-            onClick={() => setFeedback(null)}
-            className="text-xs underline shrink-0"
-          >
-            Dismiss
-          </button>
-        </div>
-      )}
+      <TransientToast
+        notification={feedback}
+        onDismiss={() => setFeedback(null)}
+      />
 
       {loadingDetail && (
         <div className="rounded-md border border-line bg-paper px-4 py-3 text-sm text-mut">
@@ -660,7 +779,7 @@ export const CentralRegistryPortal: React.FC = () => {
               className="btn-secondary"
             >
               <ArrowLeft className="w-4 h-4" />
-              <span>Back to Registry</span>
+              <span>Back</span>
             </button>
 
             <div className="flex flex-wrap items-center gap-2">
@@ -775,7 +894,7 @@ export const CentralRegistryPortal: React.FC = () => {
           {/* Patient <-> Doctor Connections */}
           <DataList
             title={`Patient ↔ Doctor Connections (${detailView.data.doctorConnections?.length || 0})`}
-            description="All specialists connected to this patient via prescriptions, appointments, or QR consultations."
+            description="All specialists connected to this patient via prescriptions, appointments, or QR consultations. Click a doctor's name to open their Doctor Details Page."
             data={detailView.data.doctorConnections || []}
             getRowId={(dc: any) => dc.doctorId}
             emptyMessage="No doctor connections recorded for this patient."
@@ -784,19 +903,24 @@ export const CentralRegistryPortal: React.FC = () => {
                 key: 'doc',
                 header: 'Connected Doctor',
                 render: (dc: any) => (
-                  <div>
-                    <div className="font-semibold text-ink">
+                  <button
+                    type="button"
+                    onClick={() => openDoctorPage(dc.doctorId)}
+                    className="text-left group"
+                  >
+                    <div className="font-semibold text-brand-800 group-hover:text-brand-900 underline underline-offset-2">
                       {dc.doctorName}
                     </div>
                     <div className="font-mono text-xs text-mut">
                       {dc.doctorCode} · {dc.specialty}
                     </div>
-                  </div>
+                  </button>
                 ),
               },
               {
                 key: 'interactions',
                 header: 'Clinical Interactions',
+                align: 'right',
                 render: (dc: any) => (
                   <span className="font-mono text-xs text-brand-700">
                     {dc.prescriptionsCount || 0} Prescriptions ·{' '}
@@ -805,28 +929,13 @@ export const CentralRegistryPortal: React.FC = () => {
                   </span>
                 ),
               },
-              {
-                key: 'action',
-                header: 'Inspect Doctor',
-                align: 'right',
-                render: (dc: any) => (
-                  <button
-                    type="button"
-                    onClick={() => openDoctorPage(dc.doctorId)}
-                    className="btn-secondary !px-2.5 !py-1"
-                  >
-                    <ExternalLink className="w-3.5 h-3.5" />
-                    <span>Doctor Page</span>
-                  </button>
-                ),
-              },
             ]}
           />
 
           {/* Patient <-> Hospital Connections */}
           <DataList
             title={`Patient ↔ Hospital Connections (${detailView.data.hospitalConnections?.length || 0})`}
-            description="Healthcare facilities that have issued laboratory reports, billing statements, or appointments for this patient."
+            description="Healthcare facilities that have issued laboratory reports, billing statements, or appointments for this patient. Click a facility name to open its Hospital Details Page."
             data={detailView.data.hospitalConnections || []}
             getRowId={(hc: any) => hc.workspaceId}
             emptyMessage="No hospital or diagnostic center connections recorded."
@@ -835,40 +944,30 @@ export const CentralRegistryPortal: React.FC = () => {
                 key: 'ws',
                 header: 'Facility',
                 render: (hc: any) => (
-                  <div>
-                    <div className="font-semibold text-ink">
+                  <button
+                    type="button"
+                    onClick={() => openWorkspacePage(hc.workspaceId)}
+                    className="text-left group"
+                  >
+                    <div className="font-semibold text-brand-800 group-hover:text-brand-900 underline underline-offset-2">
                       {hc.workspaceName}
                     </div>
                     <div className="font-mono text-xs text-mut">
                       {hc.workspaceCode}
                       {hc.area ? ` · ${hc.area}` : ''}
                     </div>
-                  </div>
+                  </button>
                 ),
               },
               {
                 key: 'activity',
                 header: 'Records & Visits',
+                align: 'right',
                 render: (hc: any) => (
                   <span className="font-mono text-xs text-brand-700">
                     {hc.documentsCount || 0} Clinical Records ·{' '}
                     {hc.appointmentsCount || 0} Appointments
                   </span>
-                ),
-              },
-              {
-                key: 'action',
-                header: 'Inspect Facility',
-                align: 'right',
-                render: (hc: any) => (
-                  <button
-                    type="button"
-                    onClick={() => openWorkspacePage(hc.workspaceId)}
-                    className="btn-secondary !px-2.5 !py-1"
-                  >
-                    <ExternalLink className="w-3.5 h-3.5" />
-                    <span>Facility Page</span>
-                  </button>
                 ),
               },
             ]}
@@ -916,35 +1015,34 @@ export const CentralRegistryPortal: React.FC = () => {
               {
                 key: 'member',
                 header: 'Linked Family Member',
-                render: (r: any) => (
-                  <div>
-                    <div className="font-semibold text-ink">{r.name}</div>
-                    <div className="font-mono text-xs text-mut">
-                      {r.uniqueId} · {r.accountType} ({r.label})
-                    </div>
-                  </div>
-                ),
-              },
-              {
-                key: 'status',
-                header: 'Status',
-                render: (r: any) => <StatusBadge label={r.status} />,
-              },
-              {
-                key: 'action',
-                header: 'Inspect Member',
-                align: 'right',
                 render: (r: any) =>
                   r.personId ? (
                     <button
                       type="button"
                       onClick={() => openPatientPage(r.personId)}
-                      className="btn-secondary !px-2.5 !py-1"
+                      className="text-left group"
                     >
-                      <ExternalLink className="w-3.5 h-3.5" />
-                      <span>Patient Page</span>
+                      <div className="font-semibold text-brand-800 group-hover:text-brand-900 underline underline-offset-2">
+                        {r.name}
+                      </div>
+                      <div className="font-mono text-xs text-mut">
+                        {r.uniqueId} · {r.accountType} ({r.label})
+                      </div>
                     </button>
-                  ) : null,
+                  ) : (
+                    <div>
+                      <div className="font-semibold text-ink">{r.name}</div>
+                      <div className="font-mono text-xs text-mut">
+                        {r.uniqueId} · {r.accountType} ({r.label})
+                      </div>
+                    </div>
+                  ),
+              },
+              {
+                key: 'status',
+                header: 'Status',
+                align: 'right',
+                render: (r: any) => <StatusBadge label={r.status} />,
               },
             ]}
           />
@@ -984,16 +1082,42 @@ export const CentralRegistryPortal: React.FC = () => {
                 key: 'source',
                 header: 'Issuing Doctor / Facility',
                 render: (d: any) => (
-                  <div className="text-sm">
+                  <div className="text-sm space-y-0.5">
                     <div>
-                      {d.doctor?.patientUser?.name ||
-                        d.doctorNameSnapshot ||
-                        'Facility Upload'}
+                      {d.doctor?.id ? (
+                        <button
+                          type="button"
+                          onClick={() => openDoctorPage(d.doctor.id)}
+                          className="font-medium text-brand-800 hover:text-brand-900 underline underline-offset-2 text-left"
+                        >
+                          {d.doctor.patientUser?.name ||
+                            d.doctorNameSnapshot ||
+                            'Doctor'}
+                        </button>
+                      ) : (
+                        <span>
+                          {d.doctor?.patientUser?.name ||
+                            d.doctorNameSnapshot ||
+                            'Facility Upload'}
+                        </span>
+                      )}
                     </div>
                     <div className="text-xs text-mut">
-                      {d.workspace?.name ||
-                        d.workspaceNameSnapshot ||
-                        'Independent Chamber'}
+                      {d.workspace?.id ? (
+                        <button
+                          type="button"
+                          onClick={() => openWorkspacePage(d.workspace.id)}
+                          className="text-brand-800 hover:text-brand-900 underline underline-offset-2 text-left"
+                        >
+                          {d.workspace.name}
+                        </button>
+                      ) : (
+                        <span>
+                          {d.workspace?.name ||
+                            d.workspaceNameSnapshot ||
+                            'Independent Chamber'}
+                        </span>
+                      )}
                     </div>
                   </div>
                 ),
@@ -1051,7 +1175,7 @@ export const CentralRegistryPortal: React.FC = () => {
               className="btn-secondary"
             >
               <ArrowLeft className="w-4 h-4" />
-              <span>Back to Registry</span>
+              <span>Back</span>
             </button>
 
             <div className="flex flex-wrap items-center gap-2">
@@ -1063,18 +1187,6 @@ export const CentralRegistryPortal: React.FC = () => {
                 <Download className="w-4 h-4" />
                 <span>Download Dossier PDF</span>
               </button>
-              {detailView.data.doctor.patientUser?.id && (
-                <button
-                  type="button"
-                  onClick={() =>
-                    openPatientPage(detailView.data.doctor.patientUser.id)
-                  }
-                  className="btn-secondary"
-                >
-                  <ExternalLink className="w-4 h-4" />
-                  <span>Linked Patient Account</span>
-                </button>
-              )}
               {detailView.data.doctor.approvalStatus !== 'APPROVED' && (
                 <button
                   type="button"
@@ -1127,7 +1239,10 @@ export const CentralRegistryPortal: React.FC = () => {
                   <h1 className="text-2xl font-semibold text-ink">
                     {detailView.data.doctor.patientUser?.name}
                   </h1>
-                  <StatusBadge label={detailView.data.doctor.specialty} tone="brand" />
+                  <StatusBadge
+                    label={detailView.data.doctor.specialty}
+                    tone="brand"
+                  />
                   <StatusBadge label={detailView.data.doctor.approvalStatus} />
                 </div>
                 <p className="text-sm text-mut mt-1">
@@ -1144,6 +1259,21 @@ export const CentralRegistryPortal: React.FC = () => {
                     {detailView.data.doctor.nationalId}
                   </span>
                 </p>
+                {detailView.data.doctor.patientUser?.id && (
+                  <div className="mt-1.5 text-xs text-mut">
+                    Linked Citizen Account:{' '}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        openPatientPage(detailView.data.doctor.patientUser.id)
+                      }
+                      className="font-semibold text-brand-800 hover:text-brand-900 underline underline-offset-2"
+                    >
+                      {detailView.data.doctor.patientUser.name} (
+                      {detailView.data.doctor.patientUser.uniqueId})
+                    </button>
+                  </div>
+                )}
               </div>
               <div className="text-sm text-right space-y-0.5">
                 <div className="text-ink-2">
@@ -1159,7 +1289,7 @@ export const CentralRegistryPortal: React.FC = () => {
           {/* Doctor <-> Hospital Multi-Chamber Fee Matrix */}
           <DataList
             title="Doctor ↔ Hospital Affiliations & Chamber Fees"
-            description="Independent chamber fee and hospital-specific consultation fees across facilities."
+            description="Independent chamber fee and hospital-specific consultation fees across facilities. Click a hospital name to open its Hospital Details Page."
             data={(detailView.data.consultationFeesByWorkspace || []).map(
               (it: any, idx: number) => ({ ...it, _rowKey: String(idx) })
             )}
@@ -1169,17 +1299,31 @@ export const CentralRegistryPortal: React.FC = () => {
               {
                 key: 'ws',
                 header: 'Hospital / Chamber',
-                render: (it: any) => (
-                  <div>
-                    <div className="font-semibold text-ink">
-                      {it.workspaceName}
+                render: (it: any) =>
+                  it.workspaceId && it.workspaceId !== 'DEFAULT_INDEPENDENT' ? (
+                    <button
+                      type="button"
+                      onClick={() => openWorkspacePage(it.workspaceId)}
+                      className="text-left group"
+                    >
+                      <div className="font-semibold text-brand-800 group-hover:text-brand-900 underline underline-offset-2">
+                        {it.workspaceName}
+                      </div>
+                      <div className="font-mono text-xs text-mut">
+                        {it.workspaceCode || it.workspaceType}
+                        {it.area ? ` · ${it.area}` : ''}
+                      </div>
+                    </button>
+                  ) : (
+                    <div>
+                      <div className="font-semibold text-ink">
+                        {it.workspaceName}
+                      </div>
+                      <div className="font-mono text-xs text-mut">
+                        {it.workspaceCode || it.workspaceType || 'Personal Chamber'}
+                      </div>
                     </div>
-                    <div className="font-mono text-xs text-mut">
-                      {it.workspaceCode || it.workspaceType}
-                      {it.area ? ` · ${it.area}` : ''}
-                    </div>
-                  </div>
-                ),
+                  ),
               },
               {
                 key: 'schedule',
@@ -1205,25 +1349,8 @@ export const CentralRegistryPortal: React.FC = () => {
               {
                 key: 'status',
                 header: 'Status',
-                render: (it: any) => <StatusBadge label={it.status} />,
-              },
-              {
-                key: 'action',
-                header: 'Inspect Facility',
                 align: 'right',
-                render: (it: any) =>
-                  it.workspaceId && it.workspaceId !== 'DEFAULT_INDEPENDENT' ? (
-                    <button
-                      type="button"
-                      onClick={() => openWorkspacePage(it.workspaceId)}
-                      className="btn-secondary !px-2.5 !py-1"
-                    >
-                      <ExternalLink className="w-3.5 h-3.5" />
-                      <span>Facility Page</span>
-                    </button>
-                  ) : (
-                    <span className="text-xs text-mut">Personal</span>
-                  ),
+                render: (it: any) => <StatusBadge label={it.status} />,
               },
             ]}
           />
@@ -1231,7 +1358,7 @@ export const CentralRegistryPortal: React.FC = () => {
           {/* Doctor <-> Patient Connections */}
           <DataList
             title={`Doctor ↔ Patient Connections (${detailView.data.connectedPatients?.length || 0})`}
-            description="Patients connected to this doctor via prescriptions, appointments, or QR consultations."
+            description="Patients connected to this doctor via prescriptions, appointments, or QR consultations. Click a patient's name to open their Patient Details Page."
             data={detailView.data.connectedPatients || []}
             getRowId={(cp: any) => cp.patientId}
             emptyMessage="No patient consultations recorded yet."
@@ -1240,38 +1367,30 @@ export const CentralRegistryPortal: React.FC = () => {
                 key: 'patient',
                 header: 'Connected Patient',
                 render: (cp: any) => (
-                  <div>
-                    <div className="font-semibold text-ink">{cp.name}</div>
+                  <button
+                    type="button"
+                    onClick={() => openPatientPage(cp.patientId)}
+                    className="text-left group"
+                  >
+                    <div className="font-semibold text-brand-800 group-hover:text-brand-900 underline underline-offset-2">
+                      {cp.name}
+                    </div>
                     <div className="font-mono text-xs text-mut">
                       {cp.uniqueId} · {cp.phone || cp.email}
                     </div>
-                  </div>
+                  </button>
                 ),
               },
               {
                 key: 'metrics',
                 header: 'Interactions',
+                align: 'right',
                 render: (cp: any) => (
                   <span className="font-mono text-xs text-brand-700">
                     {cp.prescriptionsIssued} Prescriptions ·{' '}
                     {cp.appointmentsCount} Appointments · {cp.qrScansCount} QR
                     Scans
                   </span>
-                ),
-              },
-              {
-                key: 'action',
-                header: 'Inspect Patient',
-                align: 'right',
-                render: (cp: any) => (
-                  <button
-                    type="button"
-                    onClick={() => openPatientPage(cp.patientId)}
-                    className="btn-secondary !px-2.5 !py-1"
-                  >
-                    <ExternalLink className="w-3.5 h-3.5" />
-                    <span>Patient Page</span>
-                  </button>
                 ),
               },
             ]}
@@ -1296,16 +1415,30 @@ export const CentralRegistryPortal: React.FC = () => {
               {
                 key: 'patient',
                 header: 'Patient',
-                render: (rx: any) => (
-                  <div>
-                    <div className="font-medium text-ink">
-                      {rx.patient?.name}
+                render: (rx: any) =>
+                  rx.patient?.id ? (
+                    <button
+                      type="button"
+                      onClick={() => openPatientPage(rx.patient.id)}
+                      className="text-left group"
+                    >
+                      <div className="font-semibold text-brand-800 group-hover:text-brand-900 underline underline-offset-2">
+                        {rx.patient.name}
+                      </div>
+                      <div className="font-mono text-xs text-mut">
+                        {rx.patient.uniqueId}
+                      </div>
+                    </button>
+                  ) : (
+                    <div>
+                      <div className="font-medium text-ink">
+                        {rx.patient?.name}
+                      </div>
+                      <div className="font-mono text-xs text-mut">
+                        {rx.patient?.uniqueId}
+                      </div>
                     </div>
-                    <div className="font-mono text-xs text-mut">
-                      {rx.patient?.uniqueId}
-                    </div>
-                  </div>
-                ),
+                  ),
               },
               {
                 key: 'title',
@@ -1314,7 +1447,17 @@ export const CentralRegistryPortal: React.FC = () => {
                   <div>
                     <div className="font-medium text-ink">{rx.title}</div>
                     <div className="text-xs text-mut">
-                      {rx.workspace?.name || 'Independent Chamber'}
+                      {rx.workspace?.id ? (
+                        <button
+                          type="button"
+                          onClick={() => openWorkspacePage(rx.workspace.id)}
+                          className="text-brand-800 hover:text-brand-900 underline underline-offset-2 text-left"
+                        >
+                          {rx.workspace.name}
+                        </button>
+                      ) : (
+                        rx.workspace?.name || 'Independent Chamber'
+                      )}
                     </div>
                   </div>
                 ),
@@ -1363,7 +1506,7 @@ export const CentralRegistryPortal: React.FC = () => {
               className="btn-secondary"
             >
               <ArrowLeft className="w-4 h-4" />
-              <span>Back to Registry</span>
+              <span>Back</span>
             </button>
 
             <div className="flex flex-wrap items-center gap-2">
@@ -1375,18 +1518,6 @@ export const CentralRegistryPortal: React.FC = () => {
                 <Download className="w-4 h-4" />
                 <span>Download Facility PDF</span>
               </button>
-              {detailView.data.workspace.owner?.id && (
-                <button
-                  type="button"
-                  onClick={() =>
-                    openPatientPage(detailView.data.workspace.owner.id)
-                  }
-                  className="btn-secondary"
-                >
-                  <ExternalLink className="w-4 h-4" />
-                  <span>Owner Patient Page</span>
-                </button>
-              )}
               {detailView.data.workspace.approvalStatus !== 'APPROVED' && (
                 <button
                   type="button"
@@ -1458,7 +1589,20 @@ export const CentralRegistryPortal: React.FC = () => {
               </div>
               <div className="text-sm text-right space-y-0.5">
                 <div className="font-medium text-ink">
-                  Owner: {detailView.data.workspace.owner?.name}
+                  Owner:{' '}
+                  {detailView.data.workspace.owner?.id ? (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        openPatientPage(detailView.data.workspace.owner.id)
+                      }
+                      className="font-semibold text-brand-800 hover:text-brand-900 underline underline-offset-2"
+                    >
+                      {detailView.data.workspace.owner.name}
+                    </button>
+                  ) : (
+                    detailView.data.workspace.owner?.name
+                  )}
                 </div>
                 <div className="font-mono text-xs text-mut">
                   {detailView.data.workspace.owner?.uniqueId} ·{' '}
@@ -1466,11 +1610,68 @@ export const CentralRegistryPortal: React.FC = () => {
                 </div>
               </div>
             </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 pt-3 border-t border-line">
+              <div className="rounded border border-line bg-paper-2 p-3">
+                <div className="text-xs text-mut">Offered Packages</div>
+                <div className="text-xl font-semibold font-mono text-brand-700 mt-0.5">
+                  {detailView.data.workspace.packages?.length || 0}
+                </div>
+              </div>
+              <div className="rounded border border-line bg-paper-2 p-3">
+                <div className="text-xs text-mut">Affiliated Doctors</div>
+                <div className="text-xl font-semibold font-mono text-brand-700 mt-0.5">
+                  {detailView.data.workspace.doctorAffiliations?.length || 0}
+                </div>
+              </div>
+              <div className="rounded border border-line bg-paper-2 p-3">
+                <div className="text-xs text-mut">Connected Patients</div>
+                <div className="text-xl font-semibold font-mono text-ink mt-0.5">
+                  {detailView.data.connectedPatients?.length || 0}
+                </div>
+              </div>
+              <div className="rounded border border-line bg-paper-2 p-3">
+                <div className="text-xs text-mut">Staff Members</div>
+                <div className="text-xl font-semibold font-mono text-ink mt-0.5">
+                  {detailView.data.workspace.members?.length || 0}
+                </div>
+              </div>
+              <div className="rounded border border-line bg-paper-2 p-3">
+                <div className="text-xs text-mut">Clinical Records</div>
+                <div className="text-xl font-semibold font-mono text-ink mt-0.5">
+                  {detailView.data.workspace.vaultDocuments?.length || 0}
+                </div>
+              </div>
+            </div>
           </div>
+
+          {/* Offered Health Packages (Shown prominently at TOP of Hospital Details Page) */}
+          <section className="bg-paper border border-line rounded-md p-5 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h2 className="text-lg font-semibold text-ink flex items-center gap-2">
+                  <Package className="w-4 h-4 text-brand-700" />
+                  <span>
+                    Offered Health Packages (
+                    {detailView.data.workspace.packages?.length || 0})
+                  </span>
+                </h2>
+                <p className="text-xs text-mut mt-0.5">
+                  Preventive screening bundles and diagnostic health packages
+                  published by {detailView.data.workspace.name}.
+                </p>
+              </div>
+            </div>
+            <RegistryPackageCardGrid
+              packages={detailView.data.workspace.packages || []}
+              emptyMessage={`${detailView.data.workspace.name} has not published any health packages yet.`}
+            />
+          </section>
 
           {/* Hospital <-> Doctor Connections */}
           <DataList
             title={`Hospital ↔ Doctor Connections (${detailView.data.workspace.doctorAffiliations?.length || 0})`}
+            description="Click any affiliated doctor's name to open their Doctor Details Page."
             data={detailView.data.workspace.doctorAffiliations || []}
             getRowId={(aff: any) => aff.id}
             emptyMessage="No doctor affiliations configured for this facility."
@@ -1479,14 +1680,18 @@ export const CentralRegistryPortal: React.FC = () => {
                 key: 'doctor',
                 header: 'Doctor',
                 render: (aff: any) => (
-                  <div>
-                    <div className="font-semibold text-ink">
+                  <button
+                    type="button"
+                    onClick={() => openDoctorPage(aff.doctorId)}
+                    className="text-left group"
+                  >
+                    <div className="font-semibold text-brand-800 group-hover:text-brand-900 underline underline-offset-2">
                       {aff.doctor?.patientUser?.name}
                     </div>
                     <div className="font-mono text-xs text-mut">
                       {aff.doctor?.doctorIdCode} · {aff.doctor?.specialty}
                     </div>
-                  </div>
+                  </button>
                 ),
               },
               {
@@ -1510,22 +1715,8 @@ export const CentralRegistryPortal: React.FC = () => {
               {
                 key: 'status',
                 header: 'Status',
-                render: (aff: any) => <StatusBadge label={aff.status} />,
-              },
-              {
-                key: 'action',
-                header: 'Inspect Doctor',
                 align: 'right',
-                render: (aff: any) => (
-                  <button
-                    type="button"
-                    onClick={() => openDoctorPage(aff.doctorId)}
-                    className="btn-secondary !px-2.5 !py-1"
-                  >
-                    <ExternalLink className="w-3.5 h-3.5" />
-                    <span>Doctor Page</span>
-                  </button>
-                ),
+                render: (aff: any) => <StatusBadge label={aff.status} />,
               },
             ]}
           />
@@ -1533,6 +1724,7 @@ export const CentralRegistryPortal: React.FC = () => {
           {/* Hospital <-> Patient Connections */}
           <DataList
             title={`Hospital ↔ Patient Connections (${detailView.data.connectedPatients?.length || 0})`}
+            description="Click any connected patient's name to open their Patient Details Page."
             data={detailView.data.connectedPatients || []}
             getRowId={(cp: any) => cp.patientId}
             emptyMessage="No patient visits or clinical documents recorded at this facility yet."
@@ -1541,37 +1733,29 @@ export const CentralRegistryPortal: React.FC = () => {
                 key: 'patient',
                 header: 'Patient',
                 render: (cp: any) => (
-                  <div>
-                    <div className="font-semibold text-ink">{cp.name}</div>
+                  <button
+                    type="button"
+                    onClick={() => openPatientPage(cp.patientId)}
+                    className="text-left group"
+                  >
+                    <div className="font-semibold text-brand-800 group-hover:text-brand-900 underline underline-offset-2">
+                      {cp.name}
+                    </div>
                     <div className="font-mono text-xs text-mut">
                       {cp.uniqueId} · {cp.phone || '—'}
                     </div>
-                  </div>
+                  </button>
                 ),
               },
               {
                 key: 'counts',
                 header: 'Facility Records & Appointments',
+                align: 'right',
                 render: (cp: any) => (
                   <span className="font-mono text-xs text-brand-700">
                     {cp.documentsCount} Lab/Billing Records ·{' '}
                     {cp.appointmentsCount} Appointments
                   </span>
-                ),
-              },
-              {
-                key: 'action',
-                header: 'Inspect Patient',
-                align: 'right',
-                render: (cp: any) => (
-                  <button
-                    type="button"
-                    onClick={() => openPatientPage(cp.patientId)}
-                    className="btn-secondary !px-2.5 !py-1"
-                  >
-                    <ExternalLink className="w-3.5 h-3.5" />
-                    <span>Patient Page</span>
-                  </button>
                 ),
               },
             ]}
@@ -1587,16 +1771,30 @@ export const CentralRegistryPortal: React.FC = () => {
               {
                 key: 'member',
                 header: 'Staff Member',
-                render: (m: any) => (
-                  <div>
-                    <div className="font-semibold text-ink">
-                      {m.patientUser?.name}
+                render: (m: any) =>
+                  m.patientUser?.id ? (
+                    <button
+                      type="button"
+                      onClick={() => openPatientPage(m.patientUser.id)}
+                      className="text-left group"
+                    >
+                      <div className="font-semibold text-brand-800 group-hover:text-brand-900 underline underline-offset-2">
+                        {m.patientUser.name}
+                      </div>
+                      <div className="font-mono text-xs text-mut">
+                        {m.patientUser.uniqueId}
+                      </div>
+                    </button>
+                  ) : (
+                    <div>
+                      <div className="font-semibold text-ink">
+                        {m.patientUser?.name}
+                      </div>
+                      <div className="font-mono text-xs text-mut">
+                        {m.patientUser?.uniqueId}
+                      </div>
                     </div>
-                    <div className="font-mono text-xs text-mut">
-                      {m.patientUser?.uniqueId}
-                    </div>
-                  </div>
-                ),
+                  ),
               },
               {
                 key: 'roles',
@@ -1624,29 +1822,15 @@ export const CentralRegistryPortal: React.FC = () => {
               {
                 key: 'status',
                 header: 'Status',
-                render: (m: any) => <StatusBadge label={m.invitationStatus} />,
-              },
-              {
-                key: 'action',
-                header: 'Patient Account',
                 align: 'right',
-                render: (m: any) =>
-                  m.patientUser?.id ? (
-                    <button
-                      type="button"
-                      onClick={() => openPatientPage(m.patientUser.id)}
-                      className="btn-secondary !px-2.5 !py-1"
-                    >
-                      <ExternalLink className="w-3.5 h-3.5" />
-                      <span>Patient Page</span>
-                    </button>
-                  ) : null,
+                render: (m: any) => <StatusBadge label={m.invitationStatus} />,
               },
             ]}
           />
 
           {/* Facility Clinical Documents + PDF Download */}
           <DataList
+            deferredBelowFold
             title={`Facility Clinical Documents (${detailView.data.workspace.vaultDocuments?.length || 0})`}
             data={detailView.data.workspace.vaultDocuments || []}
             getRowId={(d: any) => d.id}
@@ -1667,16 +1851,30 @@ export const CentralRegistryPortal: React.FC = () => {
               {
                 key: 'patient',
                 header: 'Patient',
-                render: (d: any) => (
-                  <div>
-                    <div className="font-medium text-ink">
-                      {d.patient?.name}
+                render: (d: any) =>
+                  d.patient?.id ? (
+                    <button
+                      type="button"
+                      onClick={() => openPatientPage(d.patient.id)}
+                      className="text-left group"
+                    >
+                      <div className="font-semibold text-brand-800 group-hover:text-brand-900 underline underline-offset-2">
+                        {d.patient.name}
+                      </div>
+                      <div className="font-mono text-xs text-mut">
+                        {d.patient.uniqueId}
+                      </div>
+                    </button>
+                  ) : (
+                    <div>
+                      <div className="font-medium text-ink">
+                        {d.patient?.name}
+                      </div>
+                      <div className="font-mono text-xs text-mut">
+                        {d.patient?.uniqueId}
+                      </div>
                     </div>
-                    <div className="font-mono text-xs text-mut">
-                      {d.patient?.uniqueId}
-                    </div>
-                  </div>
-                ),
+                  ),
               },
               {
                 key: 'title',
@@ -1715,45 +1913,6 @@ export const CentralRegistryPortal: React.FC = () => {
               },
             ]}
           />
-
-          {/* Published Health Packages */}
-          <DataList
-            title={`Published Health Packages (${detailView.data.workspace.packages?.length || 0})`}
-            data={detailView.data.workspace.packages || []}
-            getRowId={(pkg: any) => pkg.id}
-            emptyMessage="No health packages published."
-            columns={[
-              {
-                key: 'title',
-                header: 'Package Name',
-                render: (pkg: any) => (
-                  <div>
-                    <div className="font-semibold text-ink">{pkg.title}</div>
-                    <div className="text-xs text-mut">
-                      {(pkg.includedTests || []).join(', ')}
-                    </div>
-                  </div>
-                ),
-              },
-              {
-                key: 'status',
-                header: 'Status',
-                render: (pkg: any) => (
-                  <StatusBadge label={pkg.isActive ? 'ACTIVE' : 'PAUSED'} />
-                ),
-              },
-              {
-                key: 'price',
-                header: 'Package Fee',
-                align: 'right',
-                render: (pkg: any) => (
-                  <span className="font-mono font-semibold text-brand-700">
-                    {Number(pkg.price || 0).toLocaleString()} Tk
-                  </span>
-                ),
-              },
-            ]}
-          />
         </div>
       )}
 
@@ -1770,7 +1929,7 @@ export const CentralRegistryPortal: React.FC = () => {
               <p className="text-sm text-mut mt-0.5">
                 Directorate General of Health Services (DGHS) — Unified
                 governance across patients, clinicians, healthcare facilities,
-                and clinical interconnections.
+                offered packages, and clinical interconnections.
               </p>
             </div>
             <button
@@ -1785,8 +1944,12 @@ export const CentralRegistryPortal: React.FC = () => {
 
           {/* 6-Box National System Architecture Summary */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            <div className="bg-paper border border-line rounded-md p-4 space-y-1">
-              <div className="text-sm font-medium text-mut">
+            <button
+              type="button"
+              onClick={() => setActiveSection('patients')}
+              className="bg-paper border border-line hover:border-brand-400 rounded-md p-4 space-y-1 text-left transition-colors"
+            >
+              <div className="text-sm font-medium text-brand-800 underline underline-offset-2">
                 National Patient Registry
               </div>
               <div className="text-2xl font-semibold text-ink font-mono">
@@ -1798,10 +1961,14 @@ export const CentralRegistryPortal: React.FC = () => {
                 {overview.metrics.patients.childAccounts +
                   overview.metrics.patients.seniorAccounts}
               </div>
-            </div>
+            </button>
 
-            <div className="bg-paper border border-line rounded-md p-4 space-y-1">
-              <div className="text-sm font-medium text-mut">
+            <button
+              type="button"
+              onClick={() => setActiveSection('doctors')}
+              className="bg-paper border border-line hover:border-brand-400 rounded-md p-4 space-y-1 text-left transition-colors"
+            >
+              <div className="text-sm font-medium text-brand-800 underline underline-offset-2">
                 BMDC Doctor Registry
               </div>
               <div className="text-2xl font-semibold text-brand-700 font-mono">
@@ -1812,10 +1979,14 @@ export const CentralRegistryPortal: React.FC = () => {
                 {overview.metrics.doctors.DECLINED} · Disabled:{' '}
                 {overview.metrics.doctors.DISABLED}
               </div>
-            </div>
+            </button>
 
-            <div className="bg-paper border border-line rounded-md p-4 space-y-1">
-              <div className="text-sm font-medium text-mut">
+            <button
+              type="button"
+              onClick={() => setActiveSection('hospitals')}
+              className="bg-paper border border-line hover:border-brand-400 rounded-md p-4 space-y-1 text-left transition-colors"
+            >
+              <div className="text-sm font-medium text-brand-800 underline underline-offset-2">
                 Healthcare Facilities
               </div>
               <div className="text-2xl font-semibold text-brand-700 font-mono">
@@ -1828,7 +1999,7 @@ export const CentralRegistryPortal: React.FC = () => {
                 {overview.metrics.workspaces.byType?.DIAGNOSTIC_CENTER ?? 0} ·
                 Pending: {overview.metrics.workspaces.PENDING}
               </div>
-            </div>
+            </button>
 
             <div className="bg-paper border border-line rounded-md p-4 space-y-1">
               <div className="text-sm font-medium text-mut">
@@ -1864,9 +2035,13 @@ export const CentralRegistryPortal: React.FC = () => {
               </div>
             </div>
 
-            <div className="bg-paper border border-line rounded-md p-4 space-y-1">
-              <div className="text-sm font-medium text-mut">
-                Appointments & Packages
+            <button
+              type="button"
+              onClick={() => setActiveSection('hospitals')}
+              className="bg-paper border border-line hover:border-brand-400 rounded-md p-4 space-y-1 text-left transition-colors"
+            >
+              <div className="text-sm font-medium text-brand-800 underline underline-offset-2">
+                Appointments & Offered Packages
               </div>
               <div className="text-2xl font-semibold text-ink font-mono">
                 {overview.metrics.clinical.totalAppointments} Appts
@@ -1876,15 +2051,16 @@ export const CentralRegistryPortal: React.FC = () => {
                 {overview.metrics.clinical.appointmentsByStatus?.PENDING ?? 0} ·
                 Approved:{' '}
                 {overview.metrics.clinical.appointmentsByStatus?.APPROVED ?? 0}{' '}
-                · Active Packages: {overview.metrics.clinical.totalPackages}
+                · Offered Packages: {overview.metrics.clinical.totalPackages}
               </div>
-            </div>
+            </button>
           </div>
 
           {/* Pending Verification Queue */}
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
             <DataList
               title={`Pending Doctor Applications (${overview.pendingApprovals.doctors.length})`}
+              description="Click an applicant's name to open their Doctor Details Page."
               data={overview.pendingApprovals.doctors}
               getRowId={(d: any) => d.id}
               emptyMessage="All BMDC doctor applications have been reviewed."
@@ -1893,30 +2069,27 @@ export const CentralRegistryPortal: React.FC = () => {
                   key: 'doc',
                   header: 'Applicant',
                   render: (d: any) => (
-                    <div>
-                      <div className="font-semibold text-ink">
+                    <button
+                      type="button"
+                      onClick={() => openDoctorPage(d.id, 'overview')}
+                      className="text-left group"
+                    >
+                      <div className="font-semibold text-brand-800 group-hover:text-brand-900 underline underline-offset-2">
                         {d.patientUser?.name}
                       </div>
                       <div className="font-mono text-xs text-mut">
                         {d.doctorIdCode} · {d.specialty} · BMDC{' '}
                         {d.doctorLicense}
                       </div>
-                    </div>
+                    </button>
                   ),
                 },
                 {
                   key: 'actions',
-                  header: 'Actions',
+                  header: 'Governance',
                   align: 'right',
                   render: (d: any) => (
                     <div className="inline-flex items-center justify-end gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => openDoctorPage(d.id, 'overview')}
-                        className="btn-secondary !px-2.5 !py-1"
-                      >
-                        Dossier
-                      </button>
                       <button
                         type="button"
                         onClick={() =>
@@ -1943,6 +2116,7 @@ export const CentralRegistryPortal: React.FC = () => {
 
             <DataList
               title={`Pending Facility Applications (${overview.pendingApprovals.workspaces.length})`}
+              description="Click a facility name to open its Hospital Details Page."
               data={overview.pendingApprovals.workspaces}
               getRowId={(ws: any) => ws.id}
               emptyMessage="All hospital and clinic license applications have been reviewed."
@@ -1951,28 +2125,39 @@ export const CentralRegistryPortal: React.FC = () => {
                   key: 'ws',
                   header: 'Facility',
                   render: (ws: any) => (
-                    <div>
-                      <div className="font-semibold text-ink">{ws.name}</div>
+                    <div className="space-y-0.5">
+                      <button
+                        type="button"
+                        onClick={() => openWorkspacePage(ws.id, 'overview')}
+                        className="text-left font-semibold text-brand-800 hover:text-brand-900 underline underline-offset-2 block"
+                      >
+                        {ws.name}
+                      </button>
                       <div className="font-mono text-xs text-mut">
                         {ws.workspaceCode} · {ws.registrationLicense} · Owner:{' '}
-                        {ws.owner?.name}
+                        {ws.owner?.id ? (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              openPatientPage(ws.owner.id, 'overview')
+                            }
+                            className="text-brand-800 hover:text-brand-900 underline underline-offset-2"
+                          >
+                            {ws.owner.name}
+                          </button>
+                        ) : (
+                          ws.owner?.name
+                        )}
                       </div>
                     </div>
                   ),
                 },
                 {
                   key: 'actions',
-                  header: 'Actions',
+                  header: 'Governance',
                   align: 'right',
                   render: (ws: any) => (
                     <div className="inline-flex items-center justify-end gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => openWorkspacePage(ws.id, 'overview')}
-                        className="btn-secondary !px-2.5 !py-1"
-                      >
-                        Dossier
-                      </button>
                       <button
                         type="button"
                         onClick={() =>
@@ -1998,10 +2183,44 @@ export const CentralRegistryPortal: React.FC = () => {
             />
           </div>
 
+          {/* Workspaces' Offered Health Packages on Overview */}
+          <section className="bg-paper border border-line rounded-md p-5 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h2 className="text-lg font-semibold text-ink flex items-center gap-2">
+                  <Package className="w-4 h-4 text-brand-700" />
+                  <span>
+                    Workspaces&apos; Offered Health Packages (
+                    {overview.ecosystemConnections?.publishedPackages?.length ||
+                      0}
+                    )
+                  </span>
+                </h2>
+                <p className="text-xs text-mut mt-0.5">
+                  Preventive screening bundles offered across registered
+                  hospitals and diagnostic centers. Click a hospital name to
+                  open its Hospital Details Page.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActiveSection('hospitals')}
+                className="btn-secondary !px-2.5 !py-1"
+              >
+                All Hospitals
+              </button>
+            </div>
+            <RegistryPackageCardGrid
+              packages={overview.ecosystemConnections?.publishedPackages || []}
+              onOpenWorkspace={(wsId) => openWorkspacePage(wsId, 'overview')}
+              emptyMessage="No workspaces have published health packages yet."
+            />
+          </section>
+
           {/* Centralized Ecosystem Connectivity Matrices */}
           <DataList
             title={`Hospital ↔ Doctor & Patient Ecosystem Matrix (${overview.ecosystemConnections?.hospitalEcosystemSummary?.length || 0})`}
-            description="Complete view of how each registered hospital, clinic, or diagnostic center connects to affiliated doctors, patients, staff, and records."
+            description="Click any facility name to redirect directly to its Hospital Details Page."
             data={overview.ecosystemConnections?.hospitalEcosystemSummary || []}
             getRowId={(h: any) => h.workspaceId}
             emptyMessage="No healthcare facilities registered yet."
@@ -2010,12 +2229,20 @@ export const CentralRegistryPortal: React.FC = () => {
                 key: 'facility',
                 header: 'Facility',
                 render: (h: any) => (
-                  <div>
-                    <div className="font-semibold text-ink">{h.name}</div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      openWorkspacePage(h.workspaceId, 'overview')
+                    }
+                    className="text-left group"
+                  >
+                    <div className="font-semibold text-brand-800 group-hover:text-brand-900 underline underline-offset-2">
+                      {h.name}
+                    </div>
                     <div className="font-mono text-xs text-mut">
                       {h.workspaceCode} · {h.area}
                     </div>
-                  </div>
+                  </button>
                 ),
               },
               {
@@ -2039,30 +2266,34 @@ export const CentralRegistryPortal: React.FC = () => {
                 ),
               },
               {
-                key: 'clinical',
-                header: 'Clinical Output',
-                render: (h: any) => (
-                  <span className="font-mono text-xs text-ink-2">
-                    {h.recordsCount} Records · {h.appointmentsCount} Appts ·{' '}
-                    {h.packagesCount} Packages
-                  </span>
-                ),
+                key: 'packages',
+                header: 'Offered Packages',
+                render: (h: any) =>
+                  h.packages?.length > 0 ? (
+                    <div className="space-y-0.5">
+                      {h.packages.map((pkg: any) => (
+                        <div key={pkg.id} className="text-xs">
+                          <span className="font-medium text-ink">
+                            {pkg.title}
+                          </span>{' '}
+                          <span className="font-mono text-brand-700">
+                            ({Number(pkg.price || 0).toLocaleString()} Tk)
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="text-xs text-mut">None</span>
+                  ),
               },
               {
-                key: 'action',
-                header: 'Inspect',
+                key: 'clinical',
+                header: 'Clinical Output',
                 align: 'right',
                 render: (h: any) => (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      openWorkspacePage(h.workspaceId, 'overview')
-                    }
-                    className="btn-secondary !px-2.5 !py-1"
-                  >
-                    <ExternalLink className="w-3.5 h-3.5" />
-                    <span>Facility Page</span>
-                  </button>
+                  <span className="font-mono text-xs text-ink-2">
+                    {h.recordsCount} Records · {h.appointmentsCount} Appts
+                  </span>
                 ),
               },
             ]}
@@ -2070,7 +2301,7 @@ export const CentralRegistryPortal: React.FC = () => {
 
           <DataList
             title={`Hospital ↔ Doctor Chamber & Fee Connections (${overview.ecosystemConnections?.hospitalDoctorMatrix?.length || 0})`}
-            description="Bi-directional visibility between BMDC doctors and healthcare facilities with chamber fees."
+            description="Click any doctor or hospital name to open its dedicated Details Page."
             data={overview.ecosystemConnections?.hospitalDoctorMatrix || []}
             getRowId={(r: any) => r.affiliationId}
             emptyMessage="No doctor-hospital affiliations recorded."
@@ -2082,9 +2313,9 @@ export const CentralRegistryPortal: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => openDoctorPage(r.doctorId, 'overview')}
-                    className="text-left"
+                    className="text-left group"
                   >
-                    <div className="font-semibold text-brand-800 underline">
+                    <div className="font-semibold text-brand-800 group-hover:text-brand-900 underline underline-offset-2">
                       {r.doctorName}
                     </div>
                     <div className="font-mono text-xs text-mut">
@@ -2102,9 +2333,9 @@ export const CentralRegistryPortal: React.FC = () => {
                     onClick={() =>
                       openWorkspacePage(r.workspaceId, 'overview')
                     }
-                    className="text-left"
+                    className="text-left group"
                   >
-                    <div className="font-semibold text-brand-800 underline">
+                    <div className="font-semibold text-brand-800 group-hover:text-brand-900 underline underline-offset-2">
                       {r.workspaceName}
                     </div>
                     <div className="font-mono text-xs text-mut">
@@ -2135,8 +2366,9 @@ export const CentralRegistryPortal: React.FC = () => {
           />
 
           <DataList
+            deferredBelowFold
             title={`Patient ↔ Doctor Consultation Connections (${overview.ecosystemConnections?.patientDoctorMatrix?.length || 0})`}
-            description="Bi-directional clinical relationships across prescriptions and appointments."
+            description="Click any patient, doctor, or hospital name to open its dedicated Details Page."
             data={overview.ecosystemConnections?.patientDoctorMatrix || []}
             getRowId={(r: any) => r.key}
             emptyMessage="No patient-doctor consultations recorded yet."
@@ -2148,9 +2380,9 @@ export const CentralRegistryPortal: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => openPatientPage(r.patientId, 'overview')}
-                    className="text-left"
+                    className="text-left group"
                   >
-                    <div className="font-semibold text-brand-800 underline">
+                    <div className="font-semibold text-brand-800 group-hover:text-brand-900 underline underline-offset-2">
                       {r.patientName}
                     </div>
                     <div className="font-mono text-xs text-mut">
@@ -2166,9 +2398,9 @@ export const CentralRegistryPortal: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => openDoctorPage(r.doctorId, 'overview')}
-                    className="text-left"
+                    className="text-left group"
                   >
-                    <div className="font-semibold text-brand-800 underline">
+                    <div className="font-semibold text-brand-800 group-hover:text-brand-900 underline underline-offset-2">
                       {r.doctorName}
                     </div>
                     <div className="font-mono text-xs text-mut">
@@ -2180,13 +2412,31 @@ export const CentralRegistryPortal: React.FC = () => {
               {
                 key: 'facilities',
                 header: 'Chamber / Facility',
-                render: (r: any) => (
-                  <span className="text-sm text-ink-2">
-                    {r.facilities?.length
-                      ? r.facilities.join(', ')
-                      : 'Independent Personal Chamber'}
-                  </span>
-                ),
+                render: (r: any) =>
+                  r.facilityLinks?.length ? (
+                    <div className="flex flex-wrap items-center gap-1.5 text-sm">
+                      {r.facilityLinks.map((fl: any, idx: number) => (
+                        <React.Fragment key={fl.id}>
+                          {idx > 0 && <span className="text-mut">·</span>}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              openWorkspacePage(fl.id, 'overview')
+                            }
+                            className="font-medium text-brand-800 hover:text-brand-900 underline underline-offset-2 text-left"
+                          >
+                            {fl.name}
+                          </button>
+                        </React.Fragment>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="text-sm text-ink-2">
+                      {r.facilities?.length
+                        ? r.facilities.join(', ')
+                        : 'Independent Personal Chamber'}
+                    </span>
+                  ),
               },
               {
                 key: 'counts',
@@ -2203,6 +2453,7 @@ export const CentralRegistryPortal: React.FC = () => {
           />
 
           <DataList
+            deferredBelowFold
             title={`Recent National Platform Activity (${overview.recentActivityLogs?.length || 0})`}
             data={overview.recentActivityLogs || []}
             getRowId={(l: any) => l.id}
@@ -2211,22 +2462,25 @@ export const CentralRegistryPortal: React.FC = () => {
               {
                 key: 'patient',
                 header: 'Account',
-                render: (l: any) => (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      l.patient?.id && openPatientPage(l.patient.id, 'overview')
-                    }
-                    className="text-left"
-                  >
-                    <div className="font-medium text-brand-800 underline">
-                      {l.patient?.name || 'System'}
-                    </div>
-                    <div className="font-mono text-xs text-mut">
-                      {l.patient?.uniqueId}
-                    </div>
-                  </button>
-                ),
+                render: (l: any) =>
+                  l.patient?.id ? (
+                    <button
+                      type="button"
+                      onClick={() => openPatientPage(l.patient.id, 'overview')}
+                      className="text-left group"
+                    >
+                      <div className="font-medium text-brand-800 group-hover:text-brand-900 underline underline-offset-2">
+                        {l.patient.name}
+                      </div>
+                      <div className="font-mono text-xs text-mut">
+                        {l.patient.uniqueId}
+                      </div>
+                    </button>
+                  ) : (
+                    <span className="text-sm font-medium text-ink-2">
+                      System
+                    </span>
+                  ),
               },
               {
                 key: 'action',
@@ -2264,8 +2518,8 @@ export const CentralRegistryPortal: React.FC = () => {
             <div>
               <h1 className="text-2xl font-semibold text-ink">Patients</h1>
               <p className="text-sm text-mut mt-0.5">
-                Inspect full patient pages, clinical vaults, family proxy
-                relationships, and doctor/hospital connections.
+                Click any patient&apos;s name to open their full Patient Details
+                Page, clinical vault, family proxy links, and connections.
               </p>
             </div>
             <button
@@ -2336,12 +2590,18 @@ export const CentralRegistryPortal: React.FC = () => {
                 key: 'patient',
                 header: 'Patient',
                 render: (p: any) => (
-                  <div>
-                    <div className="font-semibold text-ink">{p.name}</div>
+                  <button
+                    type="button"
+                    onClick={() => openPatientPage(p.id, 'patients')}
+                    className="text-left group"
+                  >
+                    <div className="font-semibold text-brand-800 group-hover:text-brand-900 underline underline-offset-2">
+                      {p.name}
+                    </div>
                     <div className="font-mono text-xs text-mut">
                       {p.uniqueId}
                     </div>
-                  </div>
+                  </button>
                 ),
               },
               {
@@ -2377,18 +2637,10 @@ export const CentralRegistryPortal: React.FC = () => {
               },
               {
                 key: 'actions',
-                header: 'Actions',
+                header: 'Governance',
                 align: 'right',
                 render: (p: any) => (
                   <div className="inline-flex items-center justify-end gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => openPatientPage(p.id, 'patients')}
-                      className="btn-secondary !px-2.5 !py-1"
-                    >
-                      <ExternalLink className="w-3.5 h-3.5" />
-                      <span>View Page</span>
-                    </button>
                     {p.status === 'ACTIVE' ? (
                       <button
                         type="button"
@@ -2427,8 +2679,8 @@ export const CentralRegistryPortal: React.FC = () => {
             <div>
               <h1 className="text-2xl font-semibold text-ink">Doctors</h1>
               <p className="text-sm text-mut mt-0.5">
-                Verify BMDC registrations, inspect multi-hospital chamber fees,
-                and review connected patients.
+                Click any doctor&apos;s name to open their Doctor Details Page,
+                chamber fees, and connected patients.
               </p>
             </div>
             <button
@@ -2503,14 +2755,18 @@ export const CentralRegistryPortal: React.FC = () => {
                 key: 'doctor',
                 header: 'Doctor',
                 render: (d: any) => (
-                  <div>
-                    <div className="font-semibold text-ink">
+                  <button
+                    type="button"
+                    onClick={() => openDoctorPage(d.id, 'doctors')}
+                    className="text-left group"
+                  >
+                    <div className="font-semibold text-brand-800 group-hover:text-brand-900 underline underline-offset-2">
                       {d.patientUser?.name}
                     </div>
                     <div className="font-mono text-xs text-mut">
                       {d.doctorIdCode} · BMDC {d.doctorLicense}
                     </div>
-                  </div>
+                  </button>
                 ),
               },
               {
@@ -2542,18 +2798,10 @@ export const CentralRegistryPortal: React.FC = () => {
               },
               {
                 key: 'actions',
-                header: 'Actions',
+                header: 'Governance',
                 align: 'right',
                 render: (d: any) => (
                   <div className="inline-flex items-center justify-end gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => openDoctorPage(d.id, 'doctors')}
-                      className="btn-secondary !px-2.5 !py-1"
-                    >
-                      <ExternalLink className="w-3.5 h-3.5" />
-                      <span>View Page</span>
-                    </button>
                     {d.approvalStatus !== 'APPROVED' && (
                       <button
                         type="button"
@@ -2596,16 +2844,18 @@ export const CentralRegistryPortal: React.FC = () => {
       )}
 
       {/* =================================================================== */}
-      {/* 4. HOSPITALS DIRECTORY                                              */}
+      {/* 4. HOSPITALS DIRECTORY + WORKSPACES' OFFERED HEALTH PACKAGES        */}
       {/* =================================================================== */}
       {!detailView && activeSection === 'hospitals' && (
         <div className="space-y-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h1 className="text-2xl font-semibold text-ink">Hospitals</h1>
+              <h1 className="text-2xl font-semibold text-ink">
+                Hospitals &amp; Offered Packages
+              </h1>
               <p className="text-sm text-mut mt-0.5">
-                Verify facility licenses, inspect affiliated doctors and
-                patients, and audit dynamic staff roles.
+                Click any facility name to open its Hospital Details Page,
+                offered health packages, affiliated doctors, and staff roles.
               </p>
             </div>
             <button
@@ -2623,10 +2873,11 @@ export const CentralRegistryPortal: React.FC = () => {
                       ).length,
                     },
                     {
-                      label: 'Pending',
-                      value: workspaces.filter(
-                        (w) => w.approvalStatus === 'PENDING'
-                      ).length,
+                      label: 'Offered Packages',
+                      value: workspaces.reduce(
+                        (sum, w) => sum + (w.packages?.length || 0),
+                        0
+                      ),
                     },
                   ],
                   sections: [
@@ -2634,7 +2885,7 @@ export const CentralRegistryPortal: React.FC = () => {
                       heading: 'Registered Hospitals, Clinics & Diagnostic Centers',
                       rows: workspaces.map(
                         (ws) =>
-                          `${ws.name} (${ws.workspaceCode}, ${ws.type}) — License: ${ws.registrationLicense} [${ws.approvalStatus}] · ${ws._count?.doctorAffiliations || 0} Doctors, ${ws._count?.members || 0} Staff, ${ws._count?.vaultDocuments || 0} Records`
+                          `${ws.name} (${ws.workspaceCode}, ${ws.type}) — License: ${ws.registrationLicense} [${ws.approvalStatus}] · ${ws._count?.doctorAffiliations || 0} Doctors, ${ws._count?.members || 0} Staff, ${ws.packages?.length || 0} Packages`
                       ),
                     },
                   ],
@@ -2646,6 +2897,44 @@ export const CentralRegistryPortal: React.FC = () => {
               <span>Export List PDF</span>
             </button>
           </div>
+
+          {/* Top Card Grid: All Workspaces' Offered Health Packages */}
+          <section className="bg-paper border border-line rounded-md p-5 space-y-4">
+            <div>
+              <h2 className="text-lg font-semibold text-ink flex items-center gap-2">
+                <Package className="w-4 h-4 text-brand-700" />
+                <span>
+                  Workspaces&apos; Offered Health Packages (
+                  {workspaces.reduce(
+                    (sum, w) => sum + (w.packages?.length || 0),
+                    0
+                  )}
+                  )
+                </span>
+              </h2>
+              <p className="text-xs text-mut mt-0.5">
+                Preventive screening and diagnostic packages offered across
+                listed healthcare workspaces.
+              </p>
+            </div>
+            <RegistryPackageCardGrid
+              packages={workspaces.flatMap((ws: any) =>
+                (ws.packages || []).map((pkg: any) => ({
+                  ...pkg,
+                  workspace: {
+                    id: ws.id,
+                    workspaceCode: ws.workspaceCode,
+                    name: ws.name,
+                    type: ws.type,
+                    area: ws.area,
+                    approvalStatus: ws.approvalStatus,
+                  },
+                }))
+              )}
+              onOpenWorkspace={(wsId) => openWorkspacePage(wsId, 'hospitals')}
+              emptyMessage="No offered health packages match the current facility filters."
+            />
+          </section>
 
           <DataList
             title={`Registered Hospitals & Facilities (${workspaces.length})`}
@@ -2680,12 +2969,18 @@ export const CentralRegistryPortal: React.FC = () => {
                 key: 'facility',
                 header: 'Facility',
                 render: (ws: any) => (
-                  <div>
-                    <div className="font-semibold text-ink">{ws.name}</div>
+                  <button
+                    type="button"
+                    onClick={() => openWorkspacePage(ws.id, 'hospitals')}
+                    className="text-left group"
+                  >
+                    <div className="font-semibold text-brand-800 group-hover:text-brand-900 underline underline-offset-2">
+                      {ws.name}
+                    </div>
                     <div className="font-mono text-xs text-mut">
                       {ws.workspaceCode} · {ws.registrationLicense}
                     </div>
-                  </div>
+                  </button>
                 ),
               },
               {
@@ -2697,6 +2992,27 @@ export const CentralRegistryPortal: React.FC = () => {
                     <div className="text-xs text-mut mt-0.5">{ws.area}</div>
                   </div>
                 ),
+              },
+              {
+                key: 'packages',
+                header: 'Offered Packages',
+                render: (ws: any) =>
+                  ws.packages?.length > 0 ? (
+                    <div className="space-y-0.5">
+                      {ws.packages.map((pkg: any) => (
+                        <div key={pkg.id} className="text-xs">
+                          <span className="font-medium text-ink">
+                            {pkg.title}
+                          </span>{' '}
+                          <span className="font-mono text-brand-700">
+                            ({Number(pkg.price || 0).toLocaleString()} Tk)
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="text-xs text-mut">No packages</span>
+                  ),
               },
               {
                 key: 'connections',
@@ -2721,18 +3037,10 @@ export const CentralRegistryPortal: React.FC = () => {
               },
               {
                 key: 'actions',
-                header: 'Actions',
+                header: 'Governance',
                 align: 'right',
                 render: (ws: any) => (
                   <div className="inline-flex items-center justify-end gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => openWorkspacePage(ws.id, 'hospitals')}
-                      className="btn-secondary !px-2.5 !py-1"
-                    >
-                      <ExternalLink className="w-3.5 h-3.5" />
-                      <span>View Page</span>
-                    </button>
                     {ws.approvalStatus !== 'APPROVED' && (
                       <button
                         type="button"
@@ -2844,18 +3152,48 @@ export const CentralRegistryPortal: React.FC = () => {
               {
                 key: 'details',
                 header: 'Alert Details',
-                render: (row: any) => (
-                  <div>
-                    <div
-                      className={`${
-                        row.isUnread ? 'font-semibold' : 'font-medium'
-                      } text-ink`}
-                    >
-                      {row.title}
+                render: (row: any) => {
+                  const canNavigate = Boolean(
+                    row.doctorId || row.workspaceId || row.patientId
+                  );
+                  return (
+                    <div>
+                      {canNavigate ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (row.doctorId) {
+                              openDoctorPage(row.doctorId, 'notifications');
+                            } else if (row.workspaceId) {
+                              openWorkspacePage(
+                                row.workspaceId,
+                                'notifications'
+                              );
+                            } else if (row.patientId) {
+                              openPatientPage(row.patientId, 'notifications');
+                            }
+                          }}
+                          className={`text-left text-brand-800 hover:text-brand-900 underline underline-offset-2 ${
+                            row.isUnread ? 'font-semibold' : 'font-medium'
+                          }`}
+                        >
+                          {row.title}
+                        </button>
+                      ) : (
+                        <div
+                          className={`${
+                            row.isUnread ? 'font-semibold' : 'font-medium'
+                          } text-ink`}
+                        >
+                          {row.title}
+                        </div>
+                      )}
+                      <div className="text-sm text-mut mt-0.5">
+                        {row.message}
+                      </div>
                     </div>
-                    <div className="text-sm text-mut mt-0.5">{row.message}</div>
-                  </div>
-                ),
+                  );
+                },
               },
               {
                 key: 'time',
@@ -2874,15 +3212,6 @@ export const CentralRegistryPortal: React.FC = () => {
                   if (row.kind === 'PENDING_DOCTOR') {
                     return (
                       <div className="inline-flex items-center justify-end gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            openDoctorPage(row.doctorId, 'notifications')
-                          }
-                          className="btn-secondary !px-2.5 !py-1"
-                        >
-                          Open Dossier
-                        </button>
                         <button
                           type="button"
                           onClick={() =>
@@ -2907,15 +3236,6 @@ export const CentralRegistryPortal: React.FC = () => {
                   if (row.kind === 'PENDING_WORKSPACE') {
                     return (
                       <div className="inline-flex items-center justify-end gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            openWorkspacePage(row.workspaceId, 'notifications')
-                          }
-                          className="btn-secondary !px-2.5 !py-1"
-                        >
-                          Open Dossier
-                        </button>
                         <button
                           type="button"
                           onClick={() =>
@@ -2945,28 +3265,6 @@ export const CentralRegistryPortal: React.FC = () => {
                   }
                   return (
                     <div className="inline-flex items-center justify-end gap-1.5">
-                      {row.doctorId && (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            openDoctorPage(row.doctorId, 'notifications')
-                          }
-                          className="btn-secondary !px-2.5 !py-1"
-                        >
-                          Doctor Page
-                        </button>
-                      )}
-                      {row.workspaceId && (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            openWorkspacePage(row.workspaceId, 'notifications')
-                          }
-                          className="btn-secondary !px-2.5 !py-1"
-                        >
-                          Facility Page
-                        </button>
-                      )}
                       {row.isUnread && row.notifId ? (
                         <button
                           type="button"
@@ -2984,6 +3282,70 @@ export const CentralRegistryPortal: React.FC = () => {
               },
             ]}
           />
+        </div>
+      )}
+
+      {/* =================================================================== */}
+      {/* 6. CENTRAL REGISTRY INSTITUTIONAL PROFILE                           */}
+      {/* =================================================================== */}
+      {!detailView && activeSection === 'profile' && (
+        <div className="max-w-2xl mx-auto space-y-5">
+          <div className="text-center space-y-1">
+            <h1 className="text-2xl font-semibold text-ink">
+              Central Registry Profile
+            </h1>
+            <p className="text-sm text-mut">
+              National Healthcare Regulatory Authority — DGHS Governance
+              Account
+            </p>
+          </div>
+
+          <div className="bg-paper border border-line rounded-md p-6 space-y-5">
+            <div className="flex items-center gap-3.5 pb-4 border-b border-line">
+              <div className="h-12 w-12 rounded-md bg-brand-50 border border-brand-200 flex items-center justify-center text-brand-700 shrink-0">
+                <ShieldCheck className="w-6 h-6" />
+              </div>
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="text-lg font-semibold text-ink">
+                    {user?.centralRegistry?.name ||
+                      'Directorate General of Health Services'}
+                  </h2>
+                  <StatusBadge label="ACTIVE AUTHORITY" tone="brand" />
+                </div>
+                <div className="font-mono text-xs text-mut mt-0.5">
+                  Authority Code: {user?.centralRegistry?.code || 'DGHS-BD'}
+                </div>
+              </div>
+            </div>
+
+            <dl className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+              <div className="rounded border border-line bg-paper-2 p-3.5">
+                <dt className="text-xs text-mut">Official Email</dt>
+                <dd className="font-medium text-ink mt-0.5">
+                  {user?.centralRegistry?.email || 'registry@dghs.gov.bd'}
+                </dd>
+              </div>
+              <div className="rounded border border-line bg-paper-2 p-3.5">
+                <dt className="text-xs text-mut">Regulatory Hotline</dt>
+                <dd className="font-mono font-medium text-ink mt-0.5">
+                  {user?.centralRegistry?.phone || '+880-2-9880000'}
+                </dd>
+              </div>
+              <div className="rounded border border-line bg-paper-2 p-3.5">
+                <dt className="text-xs text-mut">Jurisdiction</dt>
+                <dd className="font-medium text-ink mt-0.5">
+                  National Citizen Vault, BMDC Doctors &amp; Licensed Facilities
+                </dd>
+              </div>
+              <div className="rounded border border-line bg-paper-2 p-3.5">
+                <dt className="text-xs text-mut">Audit &amp; Compliance</dt>
+                <dd className="font-medium text-brand-700 mt-0.5">
+                  Full Cross-Entity Read &amp; Verification Access
+                </dd>
+              </div>
+            </dl>
+          </div>
         </div>
       )}
 

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Stethoscope,
   Building2,
@@ -29,6 +29,15 @@ export const LandingAndAuthPortal: React.FC = () => {
   const [successMsg, setSuccessMsg] = useState<string>('');
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [showPassword, setShowPassword] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (!error && !successMsg) return;
+    const timer = setTimeout(() => {
+      setError('');
+      setSuccessMsg('');
+    }, 4500);
+    return () => clearTimeout(timer);
+  }, [error, successMsg]);
 
   // Login Form State
   const [loginIdentifier, setLoginIdentifier] = useState<string>('');
@@ -75,12 +84,41 @@ export const LandingAndAuthPortal: React.FC = () => {
   const [ownerNid, setOwnerNid] = useState<string>('');
   const [ownerPassword, setOwnerPassword] = useState<string>('');
 
-  const switchView = (nextView: PortalView) => {
+  const switchView = (nextView: PortalView, pushHistory = true) => {
     setError('');
     setSuccessMsg('');
     setShowPassword(false);
     setView(nextView);
+    if (pushHistory && typeof window !== 'undefined') {
+      window.history.pushState(
+        { umpAuthView: nextView },
+        '',
+        `#/auth/${nextView.toLowerCase()}`
+      );
+    }
+    window.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior });
   };
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.history.replaceState(
+      { umpAuthView: 'PATIENT_LOGIN' },
+      '',
+      '#/auth/patient_login'
+    );
+    const handlePopState = (event: PopStateEvent) => {
+      const nextView = event.state?.umpAuthView as PortalView | undefined;
+      if (nextView) {
+        setError('');
+        setSuccessMsg('');
+        setShowPassword(false);
+        setView(nextView);
+        window.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior });
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
 
   const handleLoginSubmit = async (
     e: React.FormEvent,
@@ -297,7 +335,7 @@ export const LandingAndAuthPortal: React.FC = () => {
   );
 
   return (
-    <div className="min-h-screen flex flex-col bg-paper-2 text-ink">
+    <div className="min-h-screen min-h-dvh flex flex-col bg-paper-2 text-ink">
       {/* Compact Single-Row Header */}
       <header className="h-14 bg-paper border-b border-line px-4 sm:px-6 flex items-center justify-between gap-4">
         <div className="flex items-center gap-2.5">
@@ -339,7 +377,7 @@ export const LandingAndAuthPortal: React.FC = () => {
             isWideForm ? 'max-w-xl' : 'max-w-md'
           } space-y-4`}
         >
-          <div className="bg-paper border border-line rounded-md overflow-hidden">
+          <div className="bg-paper border border-line rounded-md surface-clip">
             {error && (
               <div
                 role="alert"

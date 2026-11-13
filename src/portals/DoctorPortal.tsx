@@ -17,6 +17,7 @@ import { DataList } from '../components/DataList';
 import { ModalDialog } from '../components/ModalDialog';
 import { DocumentViewerModal } from '../components/DocumentViewerModal';
 import { StatusBadge } from '../components/StatusBadge';
+import { TransientToast } from '../components/TransientToast';
 import { downloadClinicalDocumentPdf } from '../utils/pdfDownload';
 
 interface MedicationItem {
@@ -25,6 +26,21 @@ interface MedicationItem {
   duration: string;
   instruction: string;
 }
+
+const PRESET_TIME_SLOTS = [
+  '09:00 AM',
+  '10:00 AM',
+  '11:00 AM',
+  '12:00 PM',
+  '02:00 PM',
+  '03:00 PM',
+  '04:00 PM',
+  '05:00 PM',
+  '06:00 PM',
+  '07:00 PM',
+  '08:00 PM',
+  '09:00 PM',
+];
 
 export const DoctorPortal: React.FC = () => {
   const {
@@ -99,7 +115,31 @@ export const DoctorPortal: React.FC = () => {
   const [reqSchedule, setReqSchedule] = useState<string>(
     'Sat, Mon, Wed: 5:00 PM - 9:00 PM'
   );
+  const [reqSlots, setReqSlots] = useState<string[]>([
+    '05:00 PM',
+    '06:00 PM',
+    '07:00 PM',
+    '08:00 PM',
+  ]);
   const [reqDepartment, setReqDepartment] = useState<string>('');
+
+  // Edit Existing Affiliation Schedule & Slots Modal
+  const [editingAff, setEditingAff] = useState<any | null>(null);
+  const [editAffFee, setEditAffFee] = useState<string>('1200');
+  const [editAffScheduleText, setEditAffScheduleText] = useState<string>('');
+  const [editAffRoom, setEditAffRoom] = useState<string>('');
+  const [editAffSlots, setEditAffSlots] = useState<string[]>([]);
+
+  // Independent Chamber Schedule & Slots
+  const [indepSchedule, setIndepSchedule] = useState<string>(
+    'Sat, Mon, Wed: 5:00 PM - 9:00 PM'
+  );
+  const [indepSlots, setIndepSlots] = useState<string[]>([
+    '05:00 PM',
+    '06:00 PM',
+    '07:00 PM',
+    '08:00 PM',
+  ]);
 
   // Profile State
   const [profSpecialty, setProfSpecialty] = useState<string>('');
@@ -153,6 +193,12 @@ export const DoctorPortal: React.FC = () => {
         setProfExpYears(String(doc.experienceYears || 10));
         setProfDefaultFee(String(doc.defaultConsultationFee || 1000));
         setProfImage(doc.profileImage || '');
+        if (doc.independentSchedule) {
+          setIndepSchedule(doc.independentSchedule);
+        }
+        if (Array.isArray(doc.independentSlots) && doc.independentSlots.length > 0) {
+          setIndepSlots(doc.independentSlots);
+        }
         if (doc.profileVisibility && typeof doc.profileVisibility === 'object') {
           setProfVisibility((prev) => ({
             ...prev,
@@ -350,6 +396,10 @@ export const DoctorPortal: React.FC = () => {
 
   const handleRequestAffiliation = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (reqSlots.length === 0) {
+      notify('error', 'Select at least one available consultation time slot.');
+      return;
+    }
     try {
       const res = await apiRequest<{ message: string }>(
         '/doctor/affiliations/request',
@@ -359,6 +409,7 @@ export const DoctorPortal: React.FC = () => {
             workspaceId: reqWorkspaceId,
             consultationFee: Number(reqFee) || 1000,
             schedule: reqSchedule,
+            availableSlots: reqSlots,
             department: reqDepartment || profSpecialty,
           },
         }
@@ -368,6 +419,49 @@ export const DoctorPortal: React.FC = () => {
       await loadCoreData();
     } catch (err: any) {
       notify('error', err.message);
+    }
+  };
+
+  const openEditAffiliationModal = (aff: any) => {
+    setEditingAff(aff);
+    setEditAffFee(String(aff.consultationFee || 1000));
+    setEditAffScheduleText(
+      aff.scheduleLabel || aff.schedule || 'Sun, Tue, Thu: 5:00 PM - 9:00 PM'
+    );
+    setEditAffRoom(aff.roomNumber || '');
+    setEditAffSlots(
+      Array.isArray(aff.availableSlots) && aff.availableSlots.length > 0
+        ? aff.availableSlots
+        : ['05:00 PM', '06:00 PM', '07:00 PM', '08:00 PM']
+    );
+  };
+
+  const handleSaveAffiliationSchedule = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingAff) return;
+    if (editAffSlots.length === 0) {
+      notify('error', 'Please configure at least one available time slot.');
+      return;
+    }
+    try {
+      const res = await apiRequest<{ message: string }>(
+        `/doctor/affiliations/${editingAff.id}/respond`,
+        {
+          method: 'PATCH',
+          body: {
+            consultationFee: Number(editAffFee) || 1000,
+            schedule: editAffScheduleText,
+            availableSlots: editAffSlots,
+            roomNumber: editAffRoom || null,
+          },
+        }
+      );
+      notify('success', 'Chamber schedule and available time slots updated.');
+      void res;
+      setEditingAff(null);
+      await loadCoreData();
+    } catch (err: any) {
+      notify('error', err.message || 'Failed to update chamber schedule.');
     }
   };
 
@@ -432,6 +526,8 @@ export const DoctorPortal: React.FC = () => {
           defaultConsultationFee: Number(profDefaultFee) || 1000,
           profileImage: profImage || null,
           profileVisibility: profVisibility,
+          independentSchedule: indepSchedule,
+          independentSlots: indepSlots,
         },
       });
       notify('success', res.message);
@@ -517,42 +613,27 @@ export const DoctorPortal: React.FC = () => {
         </div>
       )}
 
-      {/* Feedback Banner */}
-      {bannerMsg && (
-        <div
-          role="status"
-          className={`rounded-md border px-4 py-3 text-sm font-medium flex flex-wrap items-center justify-between gap-3 ${
-            bannerMsg.type === 'success'
-              ? 'bg-brand-50 border-brand-200 text-brand-800'
-              : 'bg-accent-50 border-accent-100 text-accent-600'
-          }`}
-        >
-          <span>{bannerMsg.text}</span>
-          <div className="inline-flex items-center gap-2 shrink-0">
-            {lastRevokedAffId && bannerMsg.type === 'success' && (
-              <button
-                type="button"
-                onClick={() =>
-                  handleRespondAffiliation(lastRevokedAffId, 'ACTIVE')
-                }
-                className="btn-primary !px-2.5 !py-1 text-xs"
-              >
-                Undo Revoke
-              </button>
-            )}
+      {/* Auto-Dismissing Feedback Notification */}
+      <TransientToast
+        notification={bannerMsg}
+        onDismiss={() => {
+          setBannerMsg(null);
+          setLastRevokedAffId(null);
+        }}
+        actions={
+          lastRevokedAffId && bannerMsg?.type === 'success' ? (
             <button
               type="button"
-              onClick={() => {
-                setBannerMsg(null);
-                setLastRevokedAffId(null);
-              }}
-              className="text-xs underline"
+              onClick={() =>
+                handleRespondAffiliation(lastRevokedAffId, 'ACTIVE')
+              }
+              className="btn-primary !px-2.5 !py-1 text-xs"
             >
-              Dismiss
+              Undo Revoke
             </button>
-          </div>
-        </div>
-      )}
+          ) : undefined
+        }
+      />
 
       {/* =================================================================== */}
       {/* 1. OVERVIEW                                                         */}
@@ -1072,13 +1153,28 @@ export const DoctorPortal: React.FC = () => {
               },
               {
                 key: 'schedule',
-                header: 'Chamber Schedule',
+                header: 'Chamber Schedule & Available Slots',
                 render: (aff: any) => (
-                  <div className="text-sm">
-                    <div>{aff.schedule || 'Flexible'}</div>
-                    {aff.roomNumber && (
-                      <div className="text-xs text-mut">{aff.roomNumber}</div>
-                    )}
+                  <div className="text-sm space-y-1">
+                    <div>
+                      {aff.scheduleLabel || aff.schedule || 'Flexible'}
+                      {aff.roomNumber ? (
+                        <span className="text-xs text-mut">
+                          {' '}
+                          · {aff.roomNumber}
+                        </span>
+                      ) : null}
+                    </div>
+                    <div className="flex flex-wrap gap-1">
+                      {(aff.availableSlots || []).map((slot: string) => (
+                        <span
+                          key={slot}
+                          className="inline-flex items-center rounded bg-paper-2 border border-line px-1.5 py-0.5 font-mono text-[11px] text-brand-700"
+                        >
+                          {slot}
+                        </span>
+                      ))}
+                    </div>
                   </div>
                 ),
               },
@@ -1130,15 +1226,24 @@ export const DoctorPortal: React.FC = () => {
                   }
                   if (aff.status === 'ACTIVE') {
                     return (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          handleRespondAffiliation(aff.id, 'REVOKED', true)
-                        }
-                        className="btn-danger !px-2.5 !py-1"
-                      >
-                        Revoke
-                      </button>
+                      <div className="inline-flex items-center justify-end gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => openEditAffiliationModal(aff)}
+                          className="btn-secondary !px-2.5 !py-1"
+                        >
+                          Configure Slots
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleRespondAffiliation(aff.id, 'REVOKED', true)
+                          }
+                          className="btn-danger !px-2.5 !py-1"
+                        >
+                          Revoke
+                        </button>
+                      </div>
                     );
                   }
                   if (
@@ -1447,6 +1552,54 @@ export const DoctorPortal: React.FC = () => {
                 className="w-full rounded-md border border-line bg-paper px-3 py-2 text-base text-ink"
               />
             </div>
+
+            <fieldset className="border border-line rounded-md p-4 bg-paper-2 space-y-3">
+              <legend className="text-xs font-semibold text-mut px-1">
+                Independent Personal Chamber Schedule & Time Slots
+              </legend>
+              <div>
+                <label className="block text-xs font-medium text-ink-2 mb-1">
+                  Independent Chamber Days & Hours
+                </label>
+                <input
+                  type="text"
+                  value={indepSchedule}
+                  onChange={(e) => setIndepSchedule(e.target.value)}
+                  placeholder="Sat, Mon, Wed: 5:00 PM - 9:00 PM"
+                  className="w-full rounded-md border border-line bg-paper px-3 py-1.5 text-sm text-ink"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-ink-2 mb-1.5">
+                  Patient Selectable Time Slots ({indepSlots.length} selected)
+                </label>
+                <div className="flex flex-wrap gap-1.5">
+                  {PRESET_TIME_SLOTS.map((slot) => {
+                    const active = indepSlots.includes(slot);
+                    return (
+                      <button
+                        key={slot}
+                        type="button"
+                        onClick={() =>
+                          setIndepSlots((prev) =>
+                            prev.includes(slot)
+                              ? prev.filter((s) => s !== slot)
+                              : [...prev, slot]
+                          )
+                        }
+                        className={`rounded border px-2 py-1 text-xs font-mono transition-colors ${
+                          active
+                            ? 'border-brand-700 bg-brand-700 text-white'
+                            : 'border-line bg-paper text-ink-2 hover:bg-paper-3'
+                        }`}
+                      >
+                        {slot}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </fieldset>
 
             <fieldset className="border border-line rounded-md p-4 bg-paper-2">
               <legend className="text-xs font-semibold text-mut px-1">
@@ -1963,6 +2116,37 @@ export const DoctorPortal: React.FC = () => {
             />
           </div>
 
+          <div>
+            <label className="block text-sm font-medium text-ink-2 mb-1.5">
+              Configured Consultation Time Slots ({reqSlots.length} selected)
+            </label>
+            <div className="flex flex-wrap gap-1.5">
+              {PRESET_TIME_SLOTS.map((slot) => {
+                const active = reqSlots.includes(slot);
+                return (
+                  <button
+                    key={slot}
+                    type="button"
+                    onClick={() =>
+                      setReqSlots((prev) =>
+                        prev.includes(slot)
+                          ? prev.filter((s) => s !== slot)
+                          : [...prev, slot]
+                      )
+                    }
+                    className={`rounded border px-2 py-1 text-xs font-mono transition-colors ${
+                      active
+                        ? 'border-brand-700 bg-brand-700 text-white'
+                        : 'border-line bg-paper text-ink-2 hover:bg-paper-3'
+                    }`}
+                  >
+                    {slot}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           <div className="pt-2 flex justify-end gap-2">
             <button
               type="button"
@@ -1976,6 +2160,106 @@ export const DoctorPortal: React.FC = () => {
             </button>
           </div>
         </form>
+      </ModalDialog>
+
+      {/* 3b. Configure Hospital Chamber Schedule & Time Slots Modal */}
+      <ModalDialog
+        open={Boolean(editingAff)}
+        onClose={() => setEditingAff(null)}
+        title="Configure Chamber Schedule & Time Slots"
+        subtitle={
+          editingAff
+            ? `${editingAff.workspace?.name} — Patients can only choose from the time slots you enable below.`
+            : undefined
+        }
+      >
+        {editingAff && (
+          <form onSubmit={handleSaveAffiliationSchedule} className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm font-medium text-ink-2 mb-1">
+                  Consultation Fee (Tk)
+                </label>
+                <input
+                  type="number"
+                  required
+                  value={editAffFee}
+                  onChange={(e) => setEditAffFee(e.target.value)}
+                  className="w-full rounded-md border border-line bg-paper px-3 py-2 text-base font-mono text-ink"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-ink-2 mb-1">
+                  Room / Wing
+                </label>
+                <input
+                  type="text"
+                  value={editAffRoom}
+                  onChange={(e) => setEditAffRoom(e.target.value)}
+                  placeholder="Room 302"
+                  className="w-full rounded-md border border-line bg-paper px-3 py-2 text-base text-ink"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-ink-2 mb-1">
+                Schedule Days & Hours Label
+              </label>
+              <input
+                type="text"
+                required
+                value={editAffScheduleText}
+                onChange={(e) => setEditAffScheduleText(e.target.value)}
+                className="w-full rounded-md border border-line bg-paper px-3 py-2 text-base text-ink"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-ink-2 mb-1.5">
+                Patient Selectable Time Slots ({editAffSlots.length} selected)
+              </label>
+              <div className="flex flex-wrap gap-1.5">
+                {PRESET_TIME_SLOTS.map((slot) => {
+                  const active = editAffSlots.includes(slot);
+                  return (
+                    <button
+                      key={slot}
+                      type="button"
+                      onClick={() =>
+                        setEditAffSlots((prev) =>
+                          prev.includes(slot)
+                            ? prev.filter((s) => s !== slot)
+                            : [...prev, slot]
+                        )
+                      }
+                      className={`rounded border px-2 py-1 text-xs font-mono transition-colors ${
+                        active
+                          ? 'border-brand-700 bg-brand-700 text-white'
+                          : 'border-line bg-paper text-ink-2 hover:bg-paper-3'
+                      }`}
+                    >
+                      {slot}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="pt-2 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setEditingAff(null)}
+                className="btn-secondary"
+              >
+                Cancel
+              </button>
+              <button type="submit" className="btn-primary">
+                Save Schedule & Slots
+              </button>
+            </div>
+          </form>
+        )}
       </ModalDialog>
 
       {/* 4. Shared Document Viewer Modal */}

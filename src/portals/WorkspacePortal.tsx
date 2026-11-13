@@ -14,7 +14,23 @@ import { DataList } from '../components/DataList';
 import { ModalDialog } from '../components/ModalDialog';
 import { DocumentViewerModal } from '../components/DocumentViewerModal';
 import { StatusBadge } from '../components/StatusBadge';
+import { TransientToast } from '../components/TransientToast';
 import { downloadClinicalDocumentPdf } from '../utils/pdfDownload';
+
+const PRESET_TIME_SLOTS = [
+  '09:00 AM',
+  '10:00 AM',
+  '11:00 AM',
+  '12:00 PM',
+  '02:00 PM',
+  '03:00 PM',
+  '04:00 PM',
+  '05:00 PM',
+  '06:00 PM',
+  '07:00 PM',
+  '08:00 PM',
+  '09:00 PM',
+];
 
 export const WorkspacePortal: React.FC = () => {
   const {
@@ -125,6 +141,19 @@ export const WorkspacePortal: React.FC = () => {
     'Sun, Tue, Thu: 4:00 PM - 8:00 PM'
   );
   const [invDocRoom, setInvDocRoom] = useState<string>('Room 405, Wing B');
+  const [invDocSlots, setInvDocSlots] = useState<string[]>([
+    '04:00 PM',
+    '05:00 PM',
+    '06:00 PM',
+    '07:00 PM',
+  ]);
+
+  // Configure Doctor Schedule & Available Time Slots Modal
+  const [editingWsAff, setEditingWsAff] = useState<any | null>(null);
+  const [editWsAffFee, setEditWsAffFee] = useState<string>('1200');
+  const [editWsAffSchedule, setEditWsAffSchedule] = useState<string>('');
+  const [editWsAffRoom, setEditWsAffRoom] = useState<string>('');
+  const [editWsAffSlots, setEditWsAffSlots] = useState<string[]>([]);
 
   // Create Health Package Form
   const [pkgTitle, setPkgTitle] = useState<string>('');
@@ -426,6 +455,7 @@ export const WorkspacePortal: React.FC = () => {
             doctorIdentifier: invDocIdentifier,
             consultationFee: Number(invDocFee) || 1000,
             schedule: invDocSchedule,
+            availableSlots: invDocSlots,
             roomNumber: invDocRoom,
           },
         }
@@ -465,6 +495,51 @@ export const WorkspacePortal: React.FC = () => {
       ]);
     } catch (err: any) {
       notify('error', err.message);
+    }
+  };
+
+  const openEditWsAffModal = (aff: any) => {
+    setEditingWsAff(aff);
+    setEditWsAffFee(String(aff.consultationFee || 1000));
+    setEditWsAffSchedule(
+      aff.scheduleLabel || aff.schedule || 'Sun, Tue, Thu: 5:00 PM - 9:00 PM'
+    );
+    setEditWsAffRoom(aff.roomNumber || '');
+    setEditWsAffSlots(
+      Array.isArray(aff.availableSlots) && aff.availableSlots.length > 0
+        ? aff.availableSlots
+        : ['05:00 PM', '06:00 PM', '07:00 PM', '08:00 PM']
+    );
+  };
+
+  const handleSaveWsAffSchedule = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!workspaceId || !editingWsAff) return;
+    if (editWsAffSlots.length === 0) {
+      notify('error', 'Select at least one available consultation time slot.');
+      return;
+    }
+    try {
+      const res = await apiRequest<{ message: string; auditLog?: any }>(
+        `/workspaces/${workspaceId}/doctors/${editingWsAff.id}`,
+        {
+          method: 'PATCH',
+          body: {
+            consultationFee: Number(editWsAffFee) || 1000,
+            schedule: editWsAffSchedule,
+            availableSlots: editWsAffSlots,
+            roomNumber: editWsAffRoom || null,
+          },
+        }
+      );
+      notify(
+        'success',
+        `${res.message} [${res.auditLog?.action || 'DOCTOR_SCHEDULE_UPDATED'}]`
+      );
+      setEditingWsAff(null);
+      await Promise.all([loadSectionData(), loadWorkspaceContext()]);
+    } catch (err: any) {
+      notify('error', err.message || 'Failed to update doctor schedule.');
     }
   };
 
@@ -823,25 +898,10 @@ export const WorkspacePortal: React.FC = () => {
         </div>
       )}
 
-      {bannerMsg && (
-        <div
-          role="status"
-          className={`rounded-md border px-4 py-3 text-sm font-medium flex items-center justify-between gap-3 ${
-            bannerMsg.type === 'success'
-              ? 'bg-brand-50 border-brand-200 text-brand-800'
-              : 'bg-accent-50 border-accent-100 text-accent-600'
-          }`}
-        >
-          <span>{bannerMsg.text}</span>
-          <button
-            type="button"
-            onClick={() => setBannerMsg(null)}
-            className="text-xs underline shrink-0"
-          >
-            Dismiss
-          </button>
-        </div>
-      )}
+      <TransientToast
+        notification={bannerMsg}
+        onDismiss={() => setBannerMsg(null)}
+      />
 
       {/* =================================================================== */}
       {/* 1. OVERVIEW                                                         */}
@@ -1297,13 +1357,28 @@ export const WorkspacePortal: React.FC = () => {
               },
               {
                 key: 'schedule',
-                header: 'Schedule & Room',
+                header: 'Schedule, Room & Available Slots',
                 render: (aff: any) => (
-                  <div className="text-sm">
-                    <div>{aff.schedule}</div>
-                    {aff.roomNumber && (
-                      <div className="text-xs text-mut">{aff.roomNumber}</div>
-                    )}
+                  <div className="text-sm space-y-1">
+                    <div>
+                      {aff.scheduleLabel || aff.schedule}
+                      {aff.roomNumber ? (
+                        <span className="text-xs text-mut">
+                          {' '}
+                          · {aff.roomNumber}
+                        </span>
+                      ) : null}
+                    </div>
+                    <div className="flex flex-wrap gap-1">
+                      {(aff.availableSlots || []).map((slot: string) => (
+                        <span
+                          key={slot}
+                          className="inline-flex items-center rounded bg-paper-2 border border-line px-1.5 py-0.5 font-mono text-[11px] text-brand-700"
+                        >
+                          {slot}
+                        </span>
+                      ))}
+                    </div>
                   </div>
                 ),
               },
@@ -1351,6 +1426,16 @@ export const WorkspacePortal: React.FC = () => {
                           </button>
                         </>
                       )}
+                    {(hasPerm('doctors.schedule') ||
+                      hasPerm('doctors.invite')) && (
+                      <button
+                        type="button"
+                        onClick={() => openEditWsAffModal(aff)}
+                        className="btn-secondary !px-2.5 !py-1"
+                      >
+                        Configure Slots
+                      </button>
+                    )}
                     {aff.status === 'ACTIVE' && hasPerm('doctors.remove') && (
                       <button
                         type="button"
@@ -2513,6 +2598,36 @@ export const WorkspacePortal: React.FC = () => {
               className="w-full rounded-md border border-line bg-paper px-3 py-2 text-base text-ink"
             />
           </div>
+          <div>
+            <label className="block text-sm font-medium text-ink-2 mb-1.5">
+              Configured Consultation Time Slots ({invDocSlots.length} selected)
+            </label>
+            <div className="flex flex-wrap gap-1.5">
+              {PRESET_TIME_SLOTS.map((slot) => {
+                const active = invDocSlots.includes(slot);
+                return (
+                  <button
+                    key={slot}
+                    type="button"
+                    onClick={() =>
+                      setInvDocSlots((prev) =>
+                        prev.includes(slot)
+                          ? prev.filter((s) => s !== slot)
+                          : [...prev, slot]
+                      )
+                    }
+                    className={`rounded border px-2 py-1 text-xs font-mono transition-colors ${
+                      active
+                        ? 'border-brand-700 bg-brand-700 text-white'
+                        : 'border-line bg-paper text-ink-2 hover:bg-paper-3'
+                    }`}
+                  >
+                    {slot}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
           <div className="flex justify-end gap-2 pt-2">
             <button
               type="button"
@@ -2526,6 +2641,106 @@ export const WorkspacePortal: React.FC = () => {
             </button>
           </div>
         </form>
+      </ModalDialog>
+
+      {/* 4b. Configure Doctor Chamber Schedule & Time Slots Modal */}
+      <ModalDialog
+        open={Boolean(editingWsAff)}
+        onClose={() => setEditingWsAff(null)}
+        title="Configure Doctor Chamber Schedule & Slots"
+        subtitle={
+          editingWsAff
+            ? `${editingWsAff.doctor?.patientUser?.name} — Patients can only choose from the time slots configured below.`
+            : undefined
+        }
+      >
+        {editingWsAff && (
+          <form onSubmit={handleSaveWsAffSchedule} className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm font-medium text-ink-2 mb-1">
+                  Consultation Fee (Tk)
+                </label>
+                <input
+                  type="number"
+                  required
+                  value={editWsAffFee}
+                  onChange={(e) => setEditWsAffFee(e.target.value)}
+                  className="w-full rounded-md border border-line bg-paper px-3 py-2 text-base font-mono text-ink"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-ink-2 mb-1">
+                  Room / Wing
+                </label>
+                <input
+                  type="text"
+                  value={editWsAffRoom}
+                  onChange={(e) => setEditWsAffRoom(e.target.value)}
+                  placeholder="Room 302"
+                  className="w-full rounded-md border border-line bg-paper px-3 py-2 text-base text-ink"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-ink-2 mb-1">
+                Schedule Days & Hours Label
+              </label>
+              <input
+                type="text"
+                required
+                value={editWsAffSchedule}
+                onChange={(e) => setEditWsAffSchedule(e.target.value)}
+                className="w-full rounded-md border border-line bg-paper px-3 py-2 text-base text-ink"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-ink-2 mb-1.5">
+                Patient Selectable Time Slots ({editWsAffSlots.length} selected)
+              </label>
+              <div className="flex flex-wrap gap-1.5">
+                {PRESET_TIME_SLOTS.map((slot) => {
+                  const active = editWsAffSlots.includes(slot);
+                  return (
+                    <button
+                      key={slot}
+                      type="button"
+                      onClick={() =>
+                        setEditWsAffSlots((prev) =>
+                          prev.includes(slot)
+                            ? prev.filter((s) => s !== slot)
+                            : [...prev, slot]
+                        )
+                      }
+                      className={`rounded border px-2 py-1 text-xs font-mono transition-colors ${
+                        active
+                          ? 'border-brand-700 bg-brand-700 text-white'
+                          : 'border-line bg-paper text-ink-2 hover:bg-paper-3'
+                      }`}
+                    >
+                      {slot}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="pt-2 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setEditingWsAff(null)}
+                className="btn-secondary"
+              >
+                Cancel
+              </button>
+              <button type="submit" className="btn-primary">
+                Save Schedule & Slots
+              </button>
+            </div>
+          </form>
+        )}
       </ModalDialog>
 
       {/* 5. Create Health Package Popup */}
@@ -2815,7 +3030,7 @@ export const WorkspacePortal: React.FC = () => {
             </div>
           </div>
 
-          <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
+          <div className="space-y-3">
             {Object.entries(permissionsByDomain).map(([domain, perms]) => (
               <fieldset
                 key={domain}

@@ -1,6 +1,6 @@
 import React from 'react';
 
-export type BadgeTone = 'brand' | 'warning' | 'danger' | 'neutral';
+export type BadgeTone = 'brand' | 'success' | 'warning' | 'danger' | 'neutral';
 
 interface StatusBadgeProps {
   label: string;
@@ -9,6 +9,7 @@ interface StatusBadgeProps {
 
 const TONE_CLASSES: Record<BadgeTone, string> = {
   brand: 'bg-brand-50 text-brand-800 border-brand-200',
+  success: 'bg-brand-50 text-brand-800 border-brand-200',
   warning: 'bg-gold-50 text-gold-700 border-gold-100',
   danger: 'bg-accent-50 text-accent-600 border-accent-100',
   neutral: 'bg-paper-2 text-ink-2 border-line',

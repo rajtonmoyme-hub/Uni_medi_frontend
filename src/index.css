@@ -39,11 +39,14 @@
   --color-paper-3: #f0f5f1;
 }
 
-*,
-*::before,
-*::after {
-  animation: none !important;
-  transition: none !important;
+html {
+  scrollbar-gutter: stable;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
 }
 
 body {
@@ -57,16 +60,50 @@ body {
   overflow-wrap: break-word;
 }
 
+/* Clipping utilities that avoid creating accidental scroll containers (css-layout & overflow-clipping-control) */
+.main-scroll-surface {
+  overflow-x: hidden;
+}
+
+.surface-clip {
+  overflow: hidden;
+}
+
+@supports (overflow: clip) {
+  .main-scroll-surface {
+    overflow-x: clip;
+  }
+
+  .surface-clip {
+    overflow: clip;
+  }
+}
+
+/* Layout & paint isolation for complex data cards and below-the-fold sections */
+.data-card-section {
+  contain: layout style;
+}
+
+.deferred-below-fold {
+  content-visibility: auto;
+  contain-intrinsic-size: auto none auto 22rem;
+}
+
+@supports not (content-visibility: auto) {
+  .deferred-below-fold {
+    contain: layout style paint;
+  }
+}
+
 p {
   text-wrap: pretty;
   max-width: 75ch;
 }
 
-/* Unified Reusable DataList / Responsive Sticky Table */
+/* Unified Reusable DataList / Responsive Table (no vertical scroll trap) */
 .table-wrapper {
-  overflow: auto;
+  overflow-x: auto;
   max-inline-size: 100%;
-  max-block-size: min(680px, 78vh);
   container-type: inline-size;
   background: var(--color-paper);
 }
@@ -79,9 +116,6 @@ p {
 }
 
 .table-wrapper thead {
-  position: sticky;
-  inset-block-start: 0;
-  z-index: 2;
   background-color: var(--color-paper-2);
 }
 
@@ -208,6 +242,13 @@ button:focus-visible {
   font-weight: 600;
   line-height: 1.4;
   cursor: pointer;
+  transition: background-color 140ms ease, border-color 140ms ease,
+    color 140ms ease, opacity 140ms ease;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background-color: var(--color-brand-800);
+  border-color: var(--color-brand-800);
 }
 
 .btn-primary:disabled {
@@ -229,6 +270,12 @@ button:focus-visible {
   font-weight: 500;
   line-height: 1.4;
   cursor: pointer;
+  transition: background-color 140ms ease, border-color 140ms ease,
+    color 140ms ease, opacity 140ms ease;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background-color: var(--color-paper-2);
 }
 
 .btn-secondary:disabled {
@@ -250,25 +297,152 @@ button:focus-visible {
   font-weight: 600;
   line-height: 1.4;
   cursor: pointer;
+  transition: background-color 140ms ease, border-color 140ms ease,
+    color 140ms ease, opacity 140ms ease;
 }
 
-/* Hospital Health Package Card Grid (card + css-layout subgrid alignment) */
+.btn-danger:hover:not(:disabled) {
+  background-color: var(--color-accent-100);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Transient Auto-Dismissing Toast (persistent-toast-notifications + motion) */
+[popover].app-toast {
+  position: fixed;
+  inset-block-start: 4.25rem;
+  inset-inline-end: 1.25rem;
+  inset-block-end: auto;
+  inset-inline-start: auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  width: min(26rem, calc(100dvw - 2rem));
+  max-width: calc(100vw - 2rem);
+}
+
+[popover].app-toast:is(:popover-open, .\:popover-open) {
+  display: block;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  [popover].app-toast {
+    opacity: 0;
+    translate: 0 -0.5rem;
+    transition: opacity 0.18s ease-out, translate 0.18s ease-out,
+      display 0.18s, overlay 0.18s;
+    transition-behavior: allow-discrete;
+  }
+
+  [popover].app-toast:is(:popover-open, .\:popover-open) {
+    opacity: 1;
+    translate: 0 0;
+  }
+
+  @starting-style {
+    [popover].app-toast:is(:popover-open, .\:popover-open) {
+      opacity: 0;
+      translate: 0 -0.5rem;
+    }
+  }
+}
+
+.app-toast-fallback-open {
+  position: fixed;
+  inset-block-start: 4.25rem;
+  inset-inline-end: 1.25rem;
+  z-index: 60;
+  width: min(26rem, calc(100vw - 2rem));
+}
+
+/* Hospital Health Package Card Grid */
 .package-card-grid {
   display: grid;
   inline-size: 100%;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  grid-auto-rows: auto;
-  gap: 1rem;
+  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+  gap: 0.875rem;
 }
 
 .package-card {
-  grid-row: span 3;
-  display: grid;
-  grid-template-rows: auto 1fr auto;
-  grid-template-rows: subgrid;
-  row-gap: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 0.75rem;
   background-color: var(--color-paper);
   border: 1px solid var(--color-line);
-  border-radius: 0.5rem;
-  padding: 1rem 1.125rem;
+  border-radius: 0.375rem;
+  padding: 1rem;
+  transition: border-color 140ms ease;
 }
+
+.package-card:hover {
+  border-color: var(--color-brand-400);
+}
+
+/* Family Dependent Switcher Card Grid */
+.family-card-grid {
+  display: grid;
+  inline-size: 100%;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 0.875rem;
+}
+
+.family-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 0.625rem;
+  background-color: var(--color-paper);
+  border: 1px solid var(--color-line);
+  border-radius: 0.375rem;
+  padding: 0.875rem 1rem;
+}
+
+/* Isolated Dashboard Snapshot Panels (interactions-in-complex-layouts) */
+.clinical-snapshot-panel {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 320px auto 340px;
+}
+
+@supports not (content-visibility: auto) {
+  .clinical-snapshot-panel {
+    contain: layout style paint;
+  }
+}
+
+/* Deferred Form Validation After Interaction (validate-input-after-interaction) */
+.field-hint {
+  display: block;
+  color: var(--color-mut);
+  font-size: 0.75rem;
+  margin-block-end: 0.25rem;
+}
+
+.error-msg {
+  display: none;
+  color: var(--color-accent-600);
+  font-size: 0.75rem;
+  font-weight: 500;
+  margin-block-start: 0.25rem;
+}
+
+:is(input, select, textarea):is(:user-invalid, .user-invalid-fallback) {
+  border-color: var(--color-accent-500);
+  background-color: var(--color-accent-50);
+}
+
+:is(input, select, textarea):is(:user-invalid, .user-invalid-fallback) + .error-msg {
+  display: block;
+}
+

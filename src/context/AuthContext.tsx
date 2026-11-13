@@ -5,6 +5,7 @@ import React, {
   useEffect,
   useCallback,
   useMemo,
+  useRef,
 } from 'react';
 import { apiRequest } from '../services/api';
 
@@ -55,6 +56,7 @@ interface AuthContextValue {
   activeWorkspaceId: string | null;
   actingPatientId: string | null;
   activeSection: string;
+  sectionNavTick: number;
   sidebarCollapsed: boolean;
   workspaceRolePerspective: string;
   effectiveWorkspacePermissions: string[];
@@ -75,6 +77,48 @@ interface AuthContextValue {
   logout: () => void;
 }
 
+const VALID_PERSONAS: ActivePersona[] = [
+  'PATIENT',
+  'DOCTOR',
+  'WORKSPACE',
+  'CENTRAL_REGISTRY',
+];
+
+function parseHashNavigation(): {
+  persona?: ActivePersona;
+  section?: string;
+} {
+  if (typeof window === 'undefined') return {};
+  const raw = window.location.hash.replace(/^#\/?/, '').trim();
+  if (!raw || raw.startsWith('auth/')) return {};
+  const parts = raw.split('/').filter(Boolean);
+  if (parts.length >= 2) {
+    const candidatePersona = parts[0].toUpperCase() as ActivePersona;
+    if (VALID_PERSONAS.includes(candidatePersona)) {
+      return {
+        persona: candidatePersona,
+        section: parts[1].toLowerCase(),
+      };
+    }
+  }
+  return {};
+}
+
+function formatDocumentTitle(persona: ActivePersona, section: string): string {
+  const sectionLabel = section
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+  const personaLabel =
+    persona === 'CENTRAL_REGISTRY'
+      ? 'DGHS Central Registry'
+      : persona === 'WORKSPACE'
+        ? 'Hospital Workspace'
+        : persona === 'DOCTOR'
+          ? 'Doctor Portal'
+          : 'Patient Portal';
+  return `${sectionLabel} · ${personaLabel} — Unified Health Platform`;
+}
+
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
@@ -86,6 +130,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   const [user, setUser] = useState<UserContextPayload | null>(null);
   const [loading, setLoading] = useState<boolean>(Boolean(token));
   const [activePersona, setActivePersonaState] = useState<ActivePersona>(() => {
+    const fromHash = parseHashNavigation().persona;
+    if (fromHash) return fromHash;
     return (
       (localStorage.getItem('ump_active_persona') as ActivePersona) || 'PATIENT'
     );
@@ -96,7 +142,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   const [actingPatientId, setActingPatientIdState] = useState<string | null>(
     () => localStorage.getItem('ump_acting_patient_id')
   );
-  const [activeSection, setActiveSection] = useState<string>('overview');
+  const [activeSection, setActiveSectionState] = useState<string>(() => {
+    return parseHashNavigation().section || 'overview';
+  });
+  const [sectionNavTick, setSectionNavTick] = useState<number>(0);
+
+  const isRestoringHistoryRef = useRef<boolean>(false);
+  const historyInitializedRef = useRef<boolean>(false);
+
+  const setActiveSection = useCallback((section: string) => {
+    setActiveSectionState(section);
+    setSectionNavTick((prev) => prev + 1);
+  }, []);
+
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
     return localStorage.getItem('ump_sidebar_collapsed') === '1';
   });
@@ -105,39 +163,170 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   const [unreadNotificationCount, setUnreadNotificationCount] =
     useState<number>(0);
 
-  const toggleSidebar = () => {
+  const toggleSidebar = useCallback(() => {
     setSidebarCollapsed((prev) => {
       const next = !prev;
       localStorage.setItem('ump_sidebar_collapsed', next ? '1' : '0');
       return next;
     });
-  };
+  }, []);
 
-  const setActivePersona = (persona: ActivePersona) => {
-    setActivePersonaState(persona);
-    localStorage.setItem('ump_active_persona', persona);
-    setActiveSection('overview');
-  };
+  const setActivePersona = useCallback(
+    (persona: ActivePersona) => {
+      setActivePersonaState(persona);
+      localStorage.setItem('ump_active_persona', persona);
+      setActiveSection('overview');
+    },
+    [setActiveSection]
+  );
 
-  const setActiveWorkspaceId = (wsId: string | null) => {
-    setActiveWorkspaceIdState(wsId);
-    setWorkspaceRolePerspective('COMBINED');
-    setActiveSection('overview');
-    if (wsId) {
-      localStorage.setItem('ump_active_workspace_id', wsId);
-    } else {
-      localStorage.removeItem('ump_active_workspace_id');
-    }
-  };
+  const setActiveWorkspaceId = useCallback(
+    (wsId: string | null) => {
+      setActiveWorkspaceIdState(wsId);
+      setWorkspaceRolePerspective('COMBINED');
+      setActiveSection('overview');
+      if (wsId) {
+        localStorage.setItem('ump_active_workspace_id', wsId);
+      } else {
+        localStorage.removeItem('ump_active_workspace_id');
+      }
+    },
+    [setActiveSection]
+  );
 
-  const setActingPatientId = (patId: string | null) => {
+  const setActingPatientId = useCallback((patId: string | null) => {
     setActingPatientIdState(patId);
     if (patId) {
       localStorage.setItem('ump_acting_patient_id', patId);
     } else {
       localStorage.removeItem('ump_acting_patient_id');
     }
-  };
+  }, []);
+
+  // Synchronize in-app navigation with Browser History (pushState + popstate)
+  // so clicking the Browser Back/Forward button navigates sections & personas instead of exiting the site.
+  useEffect(() => {
+    if (typeof window === 'undefined' || !user) {
+      historyInitializedRef.current = false;
+      return;
+    }
+
+    const targetHash = `#/${activePersona.toLowerCase()}/${activeSection}`;
+    document.title = formatDocumentTitle(activePersona, activeSection);
+
+    if (!historyInitializedRef.current) {
+      historyInitializedRef.current = true;
+      const rootHash = `#/${activePersona.toLowerCase()}/overview`;
+      const baseState = {
+        umpNav: true,
+        persona: activePersona,
+        section: 'overview',
+        workspaceId: activeWorkspaceId,
+        actingPatientId,
+      };
+      window.history.replaceState(baseState, '', rootHash);
+      if (activeSection !== 'overview') {
+        window.history.pushState(
+          {
+            umpNav: true,
+            persona: activePersona,
+            section: activeSection,
+            workspaceId: activeWorkspaceId,
+            actingPatientId,
+          },
+          '',
+          targetHash
+        );
+      }
+      return;
+    }
+
+    if (isRestoringHistoryRef.current) {
+      return;
+    }
+
+    const currentState = window.history.state;
+    const isSameState =
+      currentState?.umpNav &&
+      currentState.persona === activePersona &&
+      currentState.section === activeSection &&
+      currentState.workspaceId === activeWorkspaceId &&
+      currentState.actingPatientId === actingPatientId;
+
+    if (!isSameState) {
+      window.history.pushState(
+        {
+          umpNav: true,
+          persona: activePersona,
+          section: activeSection,
+          workspaceId: activeWorkspaceId,
+          actingPatientId,
+        },
+        '',
+        targetHash
+      );
+    }
+  }, [user, activePersona, activeSection, activeWorkspaceId, actingPatientId]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const handlePopState = (event: PopStateEvent) => {
+      if (!user) return;
+      const state = event.state;
+      if (state && state.umpNav) {
+        isRestoringHistoryRef.current = true;
+        const nextPersona: ActivePersona = VALID_PERSONAS.includes(
+          state.persona
+        )
+          ? state.persona
+          : 'PATIENT';
+        const nextSection: string = state.section || 'overview';
+        const nextWsId: string | null = state.workspaceId ?? null;
+        const nextProxyId: string | null = state.actingPatientId ?? null;
+
+        setActivePersonaState(nextPersona);
+        localStorage.setItem('ump_active_persona', nextPersona);
+        setActiveSectionState(nextSection);
+        setSectionNavTick((prev) => prev + 1);
+        setActiveWorkspaceIdState(nextWsId);
+        if (nextWsId) {
+          localStorage.setItem('ump_active_workspace_id', nextWsId);
+        } else {
+          localStorage.removeItem('ump_active_workspace_id');
+        }
+        setActingPatientIdState(nextProxyId);
+        if (nextProxyId) {
+          localStorage.setItem('ump_acting_patient_id', nextProxyId);
+        } else {
+          localStorage.removeItem('ump_acting_patient_id');
+        }
+        document.title = formatDocumentTitle(nextPersona, nextSection);
+        window.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior });
+        queueMicrotask(() => {
+          isRestoringHistoryRef.current = false;
+        });
+        return;
+      }
+
+      const parsed = parseHashNavigation();
+      if (parsed.persona && parsed.section) {
+        isRestoringHistoryRef.current = true;
+        setActivePersonaState(parsed.persona);
+        localStorage.setItem('ump_active_persona', parsed.persona);
+        setActiveSectionState(parsed.section);
+        setSectionNavTick((prev) => prev + 1);
+        document.title = formatDocumentTitle(parsed.persona, parsed.section);
+        window.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior });
+        queueMicrotask(() => {
+          isRestoringHistoryRef.current = false;
+        });
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [user]);
 
   const currentWorkspaceSummary = useMemo(() => {
     if (!user?.workspaces || user.workspaces.length === 0) return null;
@@ -201,7 +390,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         }
       }
     },
-    []
+    [setActiveSection]
   );
 
   const refreshUserContext = useCallback(async () => {
@@ -222,9 +411,54 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     }
   }, [applyUserContext]);
 
+  const isScrollingRef = useRef<boolean>(false);
+  const pendingUnreadRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const flushDeferredWork = () => {
+      isScrollingRef.current = false;
+      if (pendingUnreadRef.current !== null) {
+        const nextCount = pendingUnreadRef.current;
+        pendingUnreadRef.current = null;
+        setUnreadNotificationCount((prev) =>
+          prev === nextCount ? prev : nextCount
+        );
+      }
+    };
+
+    const handleScroll = () => {
+      isScrollingRef.current = true;
+      if (!('onscrollend' in window)) {
+        if (fallbackTimer) clearTimeout(fallbackTimer);
+        fallbackTimer = setTimeout(flushDeferredWork, 120);
+      }
+    };
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    if ('onscrollend' in window) {
+      window.addEventListener('scrollend', flushDeferredWork, {
+        passive: true,
+      });
+    }
+
+    return () => {
+      if (fallbackTimer) clearTimeout(fallbackTimer);
+      window.removeEventListener('scroll', handleScroll);
+      if ('onscrollend' in window) {
+        window.removeEventListener('scrollend', flushDeferredWork);
+      }
+    };
+  }, []);
+
   const refreshUnreadCount = useCallback(async () => {
+    if (typeof document !== 'undefined' && document.hidden) {
+      return;
+    }
     if (!user || !localStorage.getItem('ump_auth_token')) {
-      setUnreadNotificationCount(0);
+      setUnreadNotificationCount((prev) => (prev === 0 ? prev : 0));
       return;
     }
     try {
@@ -243,7 +477,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       if (activePersona === 'PATIENT' && !actingPatientId) {
         extraInvites += user.pendingStaffInvites?.length || 0;
       }
-      setUnreadNotificationCount((res.unreadCount || 0) + extraInvites);
+      const nextCount = (res.unreadCount || 0) + extraInvites;
+      if (isScrollingRef.current) {
+        pendingUnreadRef.current = nextCount;
+      } else {
+        setUnreadNotificationCount((prev) =>
+          prev === nextCount ? prev : nextCount
+        );
+      }
     } catch {
       // Ignore background fetch errors
     }
@@ -260,25 +501,34 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   useEffect(() => {
     if (!user) return;
     refreshUnreadCount();
-    const timer = setInterval(refreshUnreadCount, 15000);
+    const timer = setInterval(() => {
+      if (!isScrollingRef.current) {
+        refreshUnreadCount();
+      }
+    }, 15000);
     return () => clearInterval(timer);
   }, [user, refreshUnreadCount]);
 
-  const loginWithToken = (
-    newToken: string,
-    userPayload: UserContextPayload,
-    preferredPersona?: ActivePersona
-  ) => {
-    localStorage.setItem('ump_auth_token', newToken);
-    localStorage.removeItem('ump_acting_patient_id');
-    setActingPatientIdState(null);
-    setWorkspaceRolePerspective('COMBINED');
-    setActiveSection('overview');
-    setToken(newToken);
-    applyUserContext(userPayload, preferredPersona);
-  };
+  const loginWithToken = useCallback(
+    (
+      newToken: string,
+      userPayload: UserContextPayload,
+      preferredPersona?: ActivePersona
+    ) => {
+      historyInitializedRef.current = false;
+      localStorage.setItem('ump_auth_token', newToken);
+      localStorage.removeItem('ump_acting_patient_id');
+      setActingPatientIdState(null);
+      setWorkspaceRolePerspective('COMBINED');
+      setActiveSection('overview');
+      setToken(newToken);
+      applyUserContext(userPayload, preferredPersona);
+    },
+    [applyUserContext, setActiveSection]
+  );
 
-  const logout = () => {
+  const logout = useCallback(() => {
+    historyInitializedRef.current = false;
     localStorage.removeItem('ump_auth_token');
     localStorage.removeItem('ump_active_persona');
     localStorage.removeItem('ump_active_workspace_id');
@@ -291,34 +541,68 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     setWorkspaceRolePerspective('COMBINED');
     setActiveSection('overview');
     setUnreadNotificationCount(0);
-  };
+    if (typeof window !== 'undefined') {
+      window.history.replaceState(
+        { umpAuthView: 'PATIENT_LOGIN' },
+        '',
+        '#/auth/patient_login'
+      );
+      document.title = 'Sign In — Unified Health Platform';
+    }
+  }, [setActiveSection]);
+
+  const contextValue = useMemo<AuthContextValue>(
+    () => ({
+      token,
+      user,
+      loading,
+      activePersona,
+      activeWorkspaceId,
+      actingPatientId,
+      activeSection,
+      sectionNavTick,
+      sidebarCollapsed,
+      workspaceRolePerspective,
+      effectiveWorkspacePermissions,
+      unreadNotificationCount,
+      setActivePersona,
+      setActiveWorkspaceId,
+      setActingPatientId,
+      setActiveSection,
+      toggleSidebar,
+      setWorkspaceRolePerspective,
+      refreshUnreadCount,
+      loginWithToken,
+      refreshUserContext,
+      logout,
+    }),
+    [
+      token,
+      user,
+      loading,
+      activePersona,
+      activeWorkspaceId,
+      actingPatientId,
+      activeSection,
+      sectionNavTick,
+      sidebarCollapsed,
+      workspaceRolePerspective,
+      effectiveWorkspacePermissions,
+      unreadNotificationCount,
+      setActivePersona,
+      setActiveWorkspaceId,
+      setActingPatientId,
+      setActiveSection,
+      toggleSidebar,
+      refreshUnreadCount,
+      loginWithToken,
+      refreshUserContext,
+      logout,
+    ]
+  );
 
   return (
-    <AuthContext.Provider
-      value={{
-        token,
-        user,
-        loading,
-        activePersona,
-        activeWorkspaceId,
-        actingPatientId,
-        activeSection,
-        sidebarCollapsed,
-        workspaceRolePerspective,
-        effectiveWorkspacePermissions,
-        unreadNotificationCount,
-        setActivePersona,
-        setActiveWorkspaceId,
-        setActingPatientId,
-        setActiveSection,
-        toggleSidebar,
-        setWorkspaceRolePerspective,
-        refreshUnreadCount,
-        loginWithToken,
-        refreshUserContext,
-        logout,
-      }}
-    >
+    <AuthContext.Provider value={contextValue}>
       {children}
     </AuthContext.Provider>
   );

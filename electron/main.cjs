@@ -2,11 +2,23 @@ const { app, BrowserWindow, shell, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
-// Ensure smooth Wayland / X11 rendering on Linux (CachyOS, Arch, Fedora) & Windows
+// Ensure smooth GPU-composited rendering & smooth scrolling across Linux (Wayland/X11) & Windows
+app.commandLine.appendSwitch('enable-smooth-scrolling');
+app.commandLine.appendSwitch('enable-gpu-rasterization');
+app.commandLine.appendSwitch('enable-zero-copy');
+
 if (process.platform === 'linux') {
-  app.commandLine.appendSwitch('enable-features', 'UseOzonePlatform');
+  app.commandLine.appendSwitch(
+    'enable-features',
+    'UseOzonePlatform,SmoothScrolling,CanvasOopRasterization'
+  );
   app.commandLine.appendSwitch('ozone-platform-hint', 'auto');
   app.commandLine.appendSwitch('no-sandbox');
+} else {
+  app.commandLine.appendSwitch(
+    'enable-features',
+    'SmoothScrolling,CanvasOopRasterization'
+  );
 }
 
 let mainWindow = null;

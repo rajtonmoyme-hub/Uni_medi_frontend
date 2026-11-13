@@ -38,6 +38,7 @@ export const AppShellLayout: React.FC<{ children: React.ReactNode }> = ({
     activeWorkspaceId,
     actingPatientId,
     activeSection,
+    sectionNavTick,
     sidebarCollapsed,
     effectiveWorkspacePermissions,
     unreadNotificationCount,
@@ -66,6 +67,7 @@ export const AppShellLayout: React.FC<{ children: React.ReactNode }> = ({
           icon: Bell,
           badge: unreadNotificationCount,
         },
+        { id: 'profile', label: 'Profile', icon: User },
       ];
     }
 
@@ -174,6 +176,10 @@ export const AppShellLayout: React.FC<{ children: React.ReactNode }> = ({
     }
   }, [navItems, activeSection, setActiveSection]);
 
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior });
+  }, [activeSection, sectionNavTick, activePersona, activeWorkspaceId]);
+
   if (!user) return null;
 
   const activeDependents = (user.maintainedDependents || []).filter(
@@ -194,7 +200,14 @@ export const AppShellLayout: React.FC<{ children: React.ReactNode }> = ({
         : user.patient?.uniqueId || '';
 
   return (
-    <div className="min-h-screen flex flex-col bg-paper-2 text-ink">
+    <div className="min-h-screen min-h-dvh flex flex-col bg-paper-2 text-ink">
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:rounded-md focus:bg-brand-700 focus:px-3 focus:py-1.5 focus:text-xs focus:font-semibold focus:text-white"
+      >
+        Skip to main content
+      </a>
+
       {/* Single-Row Top Header (<12% viewport height) */}
       <header className="sticky top-0 z-40 h-14 bg-paper border-b border-line px-4 flex items-center justify-between gap-3">
         <div className="flex items-center gap-3 min-w-0">
@@ -231,7 +244,7 @@ export const AppShellLayout: React.FC<{ children: React.ReactNode }> = ({
           </div>
         </div>
 
-        {/* Right Controls: Mode Switcher, Proxy Selector, Notifications Route, Sign Out */}
+        {/* Right Controls: Mode Switcher, Proxy Selector, Notifications Route, Profile Icon */}
         <div className="flex items-center gap-2.5">
           {user.isCentralRegistry ? (
             <>
@@ -243,9 +256,13 @@ export const AppShellLayout: React.FC<{ children: React.ReactNode }> = ({
                 type="button"
                 onClick={() => setActiveSection('notifications')}
                 aria-label="Open Central Registry notifications"
+                aria-current={
+                  activeSection === 'notifications' ? 'page' : undefined
+                }
+                title="Notifications"
                 className={`btn-secondary !px-2.5 !py-1.5 ${
                   activeSection === 'notifications'
-                    ? '!border-brand-700 !bg-brand-50 !text-brand-800'
+                    ? '!border-brand-700 !bg-brand-50 !text-brand-800 ring-1 ring-brand-700/20'
                     : ''
                 }`}
               >
@@ -270,7 +287,7 @@ export const AppShellLayout: React.FC<{ children: React.ReactNode }> = ({
                   onClick={() => setActivePersona('PATIENT')}
                   className={`px-2.5 py-1 rounded text-xs font-medium ${
                     activePersona === 'PATIENT'
-                      ? 'bg-brand-700 text-white'
+                      ? 'bg-brand-700 text-white font-semibold'
                       : 'text-ink-2 hover:bg-paper-3'
                   }`}
                 >
@@ -282,7 +299,7 @@ export const AppShellLayout: React.FC<{ children: React.ReactNode }> = ({
                     onClick={() => setActivePersona('DOCTOR')}
                     className={`px-2.5 py-1 rounded text-xs font-medium ${
                       activePersona === 'DOCTOR'
-                        ? 'bg-brand-700 text-white'
+                        ? 'bg-brand-700 text-white font-semibold'
                         : 'text-ink-2 hover:bg-paper-3'
                     }`}
                   >
@@ -295,7 +312,7 @@ export const AppShellLayout: React.FC<{ children: React.ReactNode }> = ({
                     onClick={() => setActivePersona('WORKSPACE')}
                     className={`px-2.5 py-1 rounded text-xs font-medium ${
                       activePersona === 'WORKSPACE'
-                        ? 'bg-brand-700 text-white'
+                        ? 'bg-brand-700 text-white font-semibold'
                         : 'text-ink-2 hover:bg-paper-3'
                     }`}
                   >
@@ -346,9 +363,13 @@ export const AppShellLayout: React.FC<{ children: React.ReactNode }> = ({
                 type="button"
                 onClick={() => setActiveSection('notifications')}
                 aria-label="Open notifications page"
+                aria-current={
+                  activeSection === 'notifications' ? 'page' : undefined
+                }
+                title="Notifications"
                 className={`btn-secondary !px-2.5 !py-1.5 ${
                   activeSection === 'notifications'
-                    ? '!border-brand-700 !bg-brand-50 !text-brand-800'
+                    ? '!border-brand-700 !bg-brand-50 !text-brand-800 ring-1 ring-brand-700/20'
                     : ''
                 }`}
               >
@@ -362,26 +383,36 @@ export const AppShellLayout: React.FC<{ children: React.ReactNode }> = ({
             </>
           )}
 
+          {/* Profile Icon Button in Top Navbar */}
           <button
             type="button"
-            onClick={logout}
-            className="btn-secondary !px-2.5 !py-1.5 text-ink-2"
+            onClick={() => setActiveSection('profile')}
+            aria-label="Open profile"
+            aria-current={activeSection === 'profile' ? 'page' : undefined}
+            title={`Profile (${identityTitle})`}
+            className={`btn-secondary !px-2.5 !py-1.5 ${
+              activeSection === 'profile'
+                ? '!border-brand-700 !bg-brand-50 !text-brand-800 ring-1 ring-brand-700/20'
+                : ''
+            }`}
           >
-            <LogOut className="w-4 h-4" />
-            <span className="hidden sm:inline">Sign Out</span>
+            <User className="w-4 h-4 text-brand-700" />
           </button>
         </div>
       </header>
 
-      {/* Main Workspace Container: Collapsible Left Sidebar + Content Area */}
+      {/* Main Workspace Container: Sticky Left Sidebar + Unified Document Scroll Surface */}
       <div className="flex flex-1 min-h-0">
         <aside
           aria-label="Section navigation"
           className={`${
             sidebarCollapsed ? 'w-16' : 'w-60'
-          } shrink-0 bg-paper border-r border-line flex flex-col justify-between`}
+          } shrink-0 sticky top-14 self-start h-[calc(100vh-3.5rem)] h-[calc(100dvh-3.5rem)] bg-paper border-r border-line flex flex-col justify-between z-30`}
         >
-          <nav className="p-2.5 space-y-1">
+          <nav
+            aria-label="Primary sections"
+            className="p-2.5 space-y-1 flex-1 overflow-y-auto overscroll-contain"
+          >
             {navItems.map((item) => {
               const Icon = item.icon;
               const isActive = activeSection === item.id;
@@ -397,10 +428,10 @@ export const AppShellLayout: React.FC<{ children: React.ReactNode }> = ({
                     sidebarCollapsed
                       ? 'justify-center px-2 py-2.5'
                       : 'justify-between px-3 py-2'
-                  } rounded-md text-base font-medium ${
+                  } rounded-md text-base transition-colors duration-150 ${
                     isActive
-                      ? 'bg-brand-700 text-white'
-                      : 'text-ink-2 hover:bg-paper-2 hover:text-ink'
+                      ? 'bg-brand-700 text-white font-semibold shadow-sm ring-1 ring-brand-900/15'
+                      : 'text-ink-2 font-medium hover:bg-paper-2 hover:text-ink'
                   }`}
                 >
                   <span className="flex items-center gap-2.5 min-w-0">
@@ -431,20 +462,38 @@ export const AppShellLayout: React.FC<{ children: React.ReactNode }> = ({
             })}
           </nav>
 
-          {/* Signed-in Identity Summary at Bottom of Sidebar */}
-          {!sidebarCollapsed && (
-            <div className="p-3.5 border-t border-line bg-paper-2">
-              <div className="text-sm font-semibold text-ink truncate">
-                {identityTitle}
+          {/* Sticky Sidebar Footer: Signed-in Identity Summary + Logout Button at End */}
+          <div className="p-3 border-t border-line bg-paper-2 shrink-0 space-y-2.5">
+            {!sidebarCollapsed && (
+              <div>
+                <div className="text-sm font-semibold text-ink truncate">
+                  {identityTitle}
+                </div>
+                <div className="text-xs font-mono text-mut truncate mt-0.5">
+                  {identityCode}
+                </div>
               </div>
-              <div className="text-xs font-mono text-mut truncate mt-0.5">
-                {identityCode}
-              </div>
-            </div>
-          )}
+            )}
+            <button
+              type="button"
+              onClick={logout}
+              title={sidebarCollapsed ? 'Log Out' : undefined}
+              aria-label="Log Out"
+              className={`btn-danger w-full justify-center ${
+                sidebarCollapsed ? '!p-2' : '!py-2'
+              }`}
+            >
+              <LogOut className="w-4 h-4 shrink-0" />
+              {!sidebarCollapsed && <span>Log Out</span>}
+            </button>
+          </div>
         </aside>
 
-        <main className="flex-1 min-w-0 p-5 sm:p-6 overflow-x-hidden">
+        <main
+          id="main-content"
+          tabIndex={-1}
+          className="flex-1 min-w-0 p-5 sm:p-6 main-scroll-surface focus:outline-none"
+        >
           <div className="mx-auto max-w-[1360px] space-y-6">{children}</div>
         </main>
       </div>
