@@ -58,7 +58,7 @@ export const LandingAndAuthPortal: React.FC = () => {
   const [otpIdentifier, setOtpIdentifier] = useState<string>('');
   const [otpUniqueId, setOtpUniqueId] = useState<string>('');
   const [otpCode, setOtpCode] = useState<string>('');
-  const [demoOtpHint, setDemoOtpHint] = useState<string>('');
+  const [resendingOtp, setResendingOtp] = useState<boolean>(false);
 
   // Doctor Registration State
   const [docName, setDocName] = useState<string>('');
@@ -141,9 +141,11 @@ export const LandingAndAuthPortal: React.FC = () => {
       if (err.data?.requiresOtp) {
         setOtpIdentifier(err.data.email || loginIdentifier);
         setOtpUniqueId(err.data.uniqueId || '');
-        if (err.data.demoOtpHint) setDemoOtpHint(err.data.demoOtpHint);
+        setOtpCode('');
         setView('PATIENT_OTP');
-        setError('Please complete OTP verification to activate your account.');
+        setError(
+          'Please verify your account using the 6-digit code sent to your email.'
+        );
       } else {
         setError(err.message || 'Authentication failed.');
       }
@@ -195,10 +197,17 @@ export const LandingAndAuthPortal: React.FC = () => {
       });
       setOtpIdentifier(res.email);
       setOtpUniqueId(res.uniqueId);
-      setDemoOtpHint(res.demoOtpHint || '');
-      setSuccessMsg(
-        `Account created (${res.uniqueId}). Enter the 6-digit verification code below.`
-      );
+      setOtpCode('');
+      if (res.sentViaSmtp === false) {
+        setError(
+          res.message ||
+            'Account created, but the verification email could not be sent right now. Please click Resend Code.'
+        );
+      } else {
+        setSuccessMsg(
+          `Account created (${res.uniqueId}). Enter the 6-digit verification code sent to ${res.email}.`
+        );
+      }
       setView('PATIENT_OTP');
     } catch (err: any) {
       setError(err.message || 'Registration failed.');
@@ -225,6 +234,26 @@ export const LandingAndAuthPortal: React.FC = () => {
       setError(err.message || 'OTP verification failed.');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleResendOtp = async () => {
+    if (!otpIdentifier) return;
+    setError('');
+    setSuccessMsg('');
+    setResendingOtp(true);
+    try {
+      const res = await apiRequest('/auth/patient/resend-otp', {
+        method: 'POST',
+        body: { identifier: otpIdentifier },
+      });
+      setSuccessMsg(
+        res.message || `A new verification code has been sent to ${otpIdentifier}.`
+      );
+    } catch (err: any) {
+      setError(err.message || 'Failed to resend verification code.');
+    } finally {
+      setResendingOtp(false);
     }
   };
 
@@ -646,25 +675,16 @@ export const LandingAndAuthPortal: React.FC = () => {
                       Patient ID: {otpUniqueId}
                     </p>
                   )}
+                  {otpIdentifier && (
+                    <p className="text-sm text-mut mt-1">
+                      Enter the 6-digit verification code sent to{' '}
+                      <span className="font-medium text-ink">
+                        {otpIdentifier}
+                      </span>
+                      .
+                    </p>
+                  )}
                 </div>
-
-                {demoOtpHint && (
-                  <div className="rounded-md bg-paper-2 border border-line p-3 flex items-center justify-between gap-3">
-                    <div>
-                      <div className="text-xs text-mut">Verification Code</div>
-                      <div className="font-mono text-lg font-semibold text-ink">
-                        {demoOtpHint}
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setOtpCode(demoOtpHint)}
-                      className="btn-secondary"
-                    >
-                      Fill Code
-                    </button>
-                  </div>
-                )}
 
                 <form onSubmit={handleVerifyOtp} className="space-y-4">
                   <div>
@@ -698,6 +718,24 @@ export const LandingAndAuthPortal: React.FC = () => {
                     {submitting ? 'Verifying...' : 'Verify & Continue'}
                   </button>
                 </form>
+
+                <div className="pt-4 border-t border-line flex items-center justify-between gap-2 text-sm">
+                  <button
+                    type="button"
+                    onClick={handleResendOtp}
+                    disabled={resendingOtp || !otpIdentifier}
+                    className="font-medium text-brand-700 hover:underline disabled:opacity-50"
+                  >
+                    {resendingOtp ? 'Sending new code...' : 'Resend Code'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => switchView('PATIENT_LOGIN')}
+                    className="text-mut hover:text-ink hover:underline"
+                  >
+                    Back to Sign In
+                  </button>
+                </div>
               </div>
             )}
 
